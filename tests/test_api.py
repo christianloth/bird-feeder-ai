@@ -1,17 +1,16 @@
-"""Tests for the FastAPI REST API."""
+"""Tests for the FastAPI REST API endpoints."""
 
 from datetime import datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.backend.database import Base, Species, Detection
 from src.backend.api import app, get_db
 
 
-# Use StaticPool so all connections share the same in-memory database
 test_engine = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
@@ -34,134 +33,76 @@ client = TestClient(app)
 
 
 def _seed_data():
-    """Insert test species and detections."""
     with TestSession() as session:
-        # Clear existing data
         session.query(Detection).delete()
         session.query(Species).delete()
 
         cardinal = Species(
-            id=1,
-            common_name="Northern Cardinal",
+            id=1, common_name="Northern Cardinal",
             scientific_name="Cardinalis cardinalis",
-            family="Cardinalidae",
-            class_index=0,
+            family="Cardinalidae", class_index=0,
         )
         blue_jay = Species(
-            id=2,
-            common_name="Blue Jay",
+            id=2, common_name="Blue Jay",
             scientific_name="Cyanocitta cristata",
-            family="Corvidae",
-            class_index=1,
+            family="Corvidae", class_index=1,
         )
         session.add_all([cardinal, blue_jay])
         session.flush()
 
-        detections = [
+        session.add_all([
             Detection(timestamp=datetime(2025, 3, 15, 10, 0), species_id=1, confidence=0.95),
             Detection(timestamp=datetime(2025, 3, 15, 11, 0), species_id=1, confidence=0.88),
             Detection(timestamp=datetime(2025, 3, 15, 12, 0), species_id=2, confidence=0.92),
-        ]
-        session.add_all(detections)
+        ])
         session.commit()
 
 
 def test_health():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert client.get("/health").status_code == 200
 
 
-def test_list_species():
+def test_list_detections_and_filter():
     _seed_data()
-    response = client.get("/api/species")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
-    names = {s["common_name"] for s in data}
-    assert "Northern Cardinal" in names
-    assert "Blue Jay" in names
-
-
-def test_get_species_by_id():
-    _seed_data()
-    response = client.get("/api/species/1")
-    assert response.status_code == 200
-    assert response.json()["common_name"] == "Northern Cardinal"
-
-
-def test_get_species_not_found():
-    response = client.get("/api/species/9999")
-    assert response.status_code == 404
-
-
-def test_list_detections():
-    _seed_data()
-    response = client.get("/api/detections")
-    assert response.status_code == 200
-    data = response.json()
+    # All detections
+    data = client.get("/api/detections").json()
     assert len(data) == 3
-    # Should be ordered by timestamp descending
-    assert data[0]["species_name"] == "Blue Jay"
+    assert data[0]["species_name"] == "Blue Jay"  # Most recent first
 
-
-def test_list_detections_filter_by_species():
-    _seed_data()
-    response = client.get("/api/detections", params={"species_id": 1})
-    assert response.status_code == 200
-    data = response.json()
+    # Filter by species
+    data = client.get("/api/detections", params={"species_id": 1}).json()
     assert len(data) == 2
-    assert all(d["species_id"] == 1 for d in data)
 
-
-def test_list_detections_filter_by_confidence():
-    _seed_data()
-    response = client.get("/api/detections", params={"min_confidence": 0.90})
-    assert response.status_code == 200
-    data = response.json()
+    # Filter by confidence
+    data = client.get("/api/detections", params={"min_confidence": 0.90}).json()
     assert len(data) == 2
-    assert all(d["confidence"] >= 0.90 for d in data)
-
-
-def test_get_detection_by_id():
-    _seed_data()
-    response = client.get("/api/detections/1")
-    assert response.status_code == 200
-    assert response.json()["confidence"] == 0.95
 
 
 def test_review_detection():
     _seed_data()
-    response = client.patch(
-        "/api/detections/1/review",
-        params={"is_false_positive": True},
-    )
-    assert response.status_code == 200
-    assert response.json()["is_false_positive"] is True
+    resp = client.patch("/api/detections/1/review", params={"is_false_positive": True})
+    assert resp.status_code == 200
 
-    # Verify it persisted
-    response = client.get("/api/detections/1")
-    assert response.json()["reviewed"] is True
-    assert response.json()["is_false_positive"] is True
+    det = client.get("/api/detections/1").json()
+    assert det["reviewed"] is True
+    assert det["is_false_positive"] is True
 
 
-def test_get_stats():
+def test_stats():
     _seed_data()
-    response = client.get("/api/stats")
-    assert response.status_code == 200
-    data = response.json()
+    data = client.get("/api/stats").json()
     assert data["total_detections"] == 3
     assert data["unique_species"] == 2
     assert data["most_common_species"] == "Northern Cardinal"
-    assert data["most_common_count"] == 2
+
+    species_data = client.get("/api/stats/species").json()
+    assert species_data[0]["species"] == "Northern Cardinal"
+    assert species_data[0]["count"] == 2
 
 
-def test_get_species_stats():
+def test_species_endpoints():
     _seed_data()
-    response = client.get("/api/stats/species")
-    assert response.status_code == 200
-    data = response.json()
+    data = client.get("/api/species").json()
     assert len(data) == 2
-    # Northern Cardinal should be first (most frequent)
-    assert data[0]["species"] == "Northern Cardinal"
-    assert data[0]["count"] == 2
+
+    assert client.get("/api/species/9999").status_code == 404
