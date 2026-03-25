@@ -18,6 +18,12 @@ MobileNetV2 REQUIREMENTS:
 - Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
   (Because we're using a backbone pretrained on ImageNet, our data must be
   normalized the same way ImageNet was during that pretraining)
+- WHY normalize? The backbone's weights were optimized assuming inputs follow
+  ImageNet's distribution. Without normalization, the backbone produces garbage
+  features, and it doesn't matter how good your classifier head is.
+  Normalization shifts each channel: normalized = (pixel - mean) / std
+  so values are centered around 0 with consistent spread — exactly what the
+  pretrained backbone expects to see.
 
 AUGMENTATIONS TO CONSIDER FOR BIRDS:
 - RandomResizedCrop(224): Randomly crop and resize — simulates different distances
@@ -58,7 +64,14 @@ def get_train_transforms() -> transforms.Compose:
     5. transforms.ToTensor()
     6. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
     """
-    raise NotImplementedError("Implement me!")
+    return transforms.Compose([
+        transforms.RandomResizedCrop(INPUT_SIZE),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+    ])
 
 
 def get_val_transforms() -> transforms.Compose:
@@ -75,7 +88,12 @@ def get_val_transforms() -> transforms.Compose:
     - No randomness ensures evaluation is reproducible
     - Resize(256) then CenterCrop(224) is the standard ImageNet eval protocol
     """
-    raise NotImplementedError("Implement me!")
+    return transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(INPUT_SIZE),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+    ])
 
 
 def get_inference_transforms() -> transforms.Compose:
