@@ -21,10 +21,44 @@ MobileNetV2 ARCHITECTURE:
 
     We change: classifier = Linear(1280, num_species)
 
+WHAT EACH LAYER GROUP "SEES" (and how fine-tuning changes them):
+    Before fine-tuning (pretrained on ImageNet — 1000 generic classes like "bus", "pizza", "tabby cat"):
+
+    Layers 0-6  (early):  Edges, corners, textures, basic color gradients
+                           → These are UNIVERSAL visual features. A feather edge looks
+                             the same whether you're classifying birds or cars.
+                           → Barely change during fine-tuning. Stay frozen.
+
+    Layers 7-13 (middle): Shapes, patterns, eyes, repeated textures
+                           → Slightly more task-specific but still broadly useful.
+                           → Minor adaptation during fine-tuning. Stay frozen.
+
+    Layers 14-17 (late):  High-level semantic features — "object parts"
+                           → BEFORE fine-tuning: generic parts (wheels, fur, petals)
+                           → AFTER fine-tuning: bird-specific parts (beak shapes,
+                             breast streaking, wing bars, eye rings)
+                           → These are the layers we UNFREEZE in Phase 2.
+
+    Classifier head:       The final decision layer
+                           → BEFORE: 1000 ImageNet classes (bus, pizza, robin, ...)
+                           → AFTER: 555 NABirds species (House Finch, Purple Finch, ...)
+                           → Completely REPLACED — this is the first thing we train.
+
+    This is called "catastrophic forgetting" — and here it's INTENTIONAL.
+    After fine-tuning, the model will NOT recognize "school bus" or "pizza" anymore.
+    But it WILL distinguish a House Finch from a Purple Finch.
+
+    Think of it like a general handyman retraining as a specialized electrician:
+    they don't forget how to use a screwdriver (early layers), but they stop
+    thinking about plumbing (old classifier) and develop deep expertise in
+    wiring (bird-specific features).
+
 WHY MobileNetV2?
 - Small (3.4M params) — trains fast, converts well to Hailo
 - Designed for mobile/edge — perfect for Raspberry Pi
 - Depthwise separable convolutions — efficient but still accurate
+- Google uses it for their official iNaturalist bird classifier on Coral TPU
+- Well-documented with tons of transfer learning tutorials
 
 DOCS:
 - https://pytorch.org/vision/stable/models/mobilenetv2.html
@@ -83,6 +117,22 @@ def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
             Unfreezing from 14 means: layers 14-17 + classifier are trainable.
             Earlier layers (0-13) stay frozen — they detect basic features
             (edges, textures) that are universal.
+
+    WHY ONLY UNFREEZE LATE LAYERS?
+        Layer 0-6:  Edges, textures       → universal, no need to change
+        Layer 7-13: Shapes, patterns       → mostly universal, leave frozen
+        Layer 14-17: High-level features   → THESE need to shift from "generic object
+                                              parts" to "bird-specific features" like
+                                              beak curvature, feather patterns, eye rings
+        Classifier: Final decision         → already trained in Phase 1
+
+        By only unfreezing 14+, we get bird-specific adaptation without
+        destroying the valuable low-level feature detectors.
+
+    WHY A LOWER LEARNING RATE?
+        The unfrozen backbone layers already have good weights from ImageNet.
+        We want to NUDGE them toward birds, not randomly scramble them.
+        Typical strategy: use 1/10th of the Phase 1 learning rate.
 
     TODO:
     1. First, freeze everything: set requires_grad=False for all parameters

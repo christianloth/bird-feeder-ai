@@ -183,14 +183,45 @@ if __name__ == "__main__":
     # This block runs when you execute: python -m src.training.train
     # Wire everything together here once you've implemented the pieces above.
     #
+    # THE TWO-PHASE TRAINING STRATEGY:
+    #
+    # Phase 1 — "Teach the new head" (freeze_backbone=True)
+    #   The backbone already knows how to SEE (edges, textures, shapes, feathers).
+    #   We freeze it and only train the classifier head so it learns to MAP those
+    #   visual features to our 555 bird species. This is fast because only the
+    #   final Linear layer has trainable weights.
+    #
+    #   What's happening inside:
+    #     Image → [FROZEN backbone extracts features] → [NEW head learns species] → prediction
+    #     Early layers see edges → middle layers see shapes → late layers see "parts"
+    #     Only the head weights update. Backbone stays exactly as ImageNet trained it.
+    #
+    # Phase 2 — "Specialize the vision" (unfreeze layers 14+, lower LR)
+    #   Now that the head is decent, we unfreeze the LATE backbone layers (14-17)
+    #   and train with a LOWER learning rate (typically 1/10th of Phase 1).
+    #   This lets those layers shift from detecting "generic object parts" to
+    #   detecting "bird-specific features" like beak shapes and wing bars.
+    #
+    #   What's happening inside:
+    #     Image → [FROZEN early layers: edges/textures] →
+    #             [UNFROZEN late layers: adapting to bird parts] →
+    #             [Trained head: bird species] → prediction
+    #
+    #   The lower LR is critical: these layers already have GOOD weights from
+    #   ImageNet. We want to gently nudge them toward birds, not scramble them.
+    #
+    # After both phases, the model has undergone "catastrophic forgetting" —
+    # it can no longer classify "school bus" or "pizza", but it CAN distinguish
+    # a House Finch from a Purple Finch. That's exactly what we want.
+    #
     # Rough outline:
     # 1. from src.training.dataset import NABirdsDataset
     # 2. from src.training.transforms import get_train_transforms, get_val_transforms
-    # 3. from src.training.model import create_model
+    # 3. from src.training.model import create_model, unfreeze_backbone
     # 4. Create datasets with transforms
     # 5. Create DataLoaders
     # 6. Create model with freeze_backbone=True
-    # 7. Train for N epochs (classifier head only)
-    # 8. Unfreeze backbone, lower LR, train for more epochs
+    # 7. Phase 1: Train for N epochs (classifier head only, lr=0.001)
+    # 8. Phase 2: unfreeze_backbone(model), train for more epochs (lr=0.0001)
     # 9. Evaluate final model
     pass
