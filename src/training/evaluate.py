@@ -110,10 +110,15 @@ def plot_training_history(history: dict, save_path: str | Path | None = None) ->
     """
     Plot training and validation loss/accuracy curves.
 
-    This is your primary tool for diagnosing overfitting:
-    - If train_acc >> val_acc: overfitting (add augmentation/dropout)
-    - If both are low: underfitting (train longer, unfreeze backbone)
-    - If both rise steadily: good training
+    This is your primary tool for diagnosing overfitting by comparing
+    train vs val loss/accuracy side by side:
+    - If train_acc >> val_acc: overfitting (model memorizes training data)
+      → Fix: add augmentation, more dropout, early stopping
+    - If both are low: underfitting (model hasn't learned enough)
+      → Fix: train longer, unfreeze backbone, increase model capacity
+    - If both rise steadily: good training, keep going
+    - If val_loss starts rising while train_loss drops: overfitting has begun
+      → The epoch just before val_loss rose is your best stopping point
 
     TODO:
     1. Create a figure with 2 subplots side by side

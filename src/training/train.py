@@ -67,6 +67,10 @@ def train_one_epoch(
     Returns:
         Dict with "loss" (average training loss) and "accuracy" (training accuracy)
 
+    TRAINING LOSS: forward pass → compute loss → backpropagate → update weights.
+    The loss DRIVES learning — gradients flow backward and the optimizer adjusts
+    weights to reduce it.
+
     TODO:
     1. Set model to training mode: model.train()
     2. Initialize running_loss = 0.0 and correct = 0 and total = 0
@@ -99,6 +103,19 @@ def validate(
     Evaluate the model on validation data.
 
     Args & Returns: Same pattern as train_one_epoch
+
+    VALIDATION LOSS: forward pass → compute loss → that's it. No backprop,
+    no weight updates. We're just MEASURING performance on unseen data.
+    The @torch.no_grad() decorator above saves memory by skipping gradient tracking.
+
+    WHY COMPUTE BOTH TRAIN AND VAL LOSS?
+    Compare them to detect overfitting:
+        Epoch 1:  train_loss=2.5  val_loss=2.6   ← both high, model is learning
+        Epoch 10: train_loss=0.3  val_loss=0.5   ← both dropping, good progress
+        Epoch 30: train_loss=0.05 val_loss=0.8   ← OVERFITTING: train drops, val rises
+    When train loss keeps dropping but val loss rises, the model is memorizing
+    training images instead of learning general bird features. That's your signal
+    to stop training or add more augmentation.
 
     TODO:
     1. Set model to eval mode: model.eval()
