@@ -149,3 +149,34 @@ class NABirdsDataset(Dataset):
     def get_species_name(self, class_idx: int) -> str:
         """Convert a class index back to a species name for display."""
         return self.class_to_species[class_idx]
+
+
+class PreprocessedNABirdsDataset(Dataset):
+    """Loads pre-processed .pt tensors saved by scripts/preprocess_dataset.py.
+
+    Each file contains a (image_tensor, label) tuple ready for training — no
+    transforms are applied at load time, so data loading is nearly free.
+    """
+
+    def __init__(self, preprocessed_dir: str | Path, split: str = "train"):
+        self.split_dir = Path(preprocessed_dir) / split
+        metadata = torch.load(
+            Path(preprocessed_dir) / f"{split}_metadata.pt", weights_only=False
+        )
+        self._num_classes = metadata["num_classes"]
+        self.class_to_species = metadata["class_to_species"]
+        self._num_samples = metadata["num_samples"]
+
+    def __len__(self) -> int:
+        return self._num_samples
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        image, label = torch.load(self.split_dir / f"{idx:06d}.pt", weights_only=True)
+        return image, label
+
+    @property
+    def num_classes(self) -> int:
+        return self._num_classes
+
+    def get_species_name(self, class_idx: int) -> str:
+        return self.class_to_species[class_idx]

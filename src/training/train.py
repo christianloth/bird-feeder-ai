@@ -53,6 +53,7 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: optim.Optimizer,
     device: torch.device,
+    scaler: torch.amp.GradScaler | None = None,
 ) -> dict:
     """
     Train the model for one epoch.
@@ -63,6 +64,7 @@ def train_one_epoch(
         criterion: Loss function (CrossEntropyLoss)
         optimizer: Optimizer (Adam)
         device: cpu, cuda, or mps
+        scaler: GradScaler for mixed precision (None = FP32 training)
 
     Returns:
         Dict with "loss" (average training loss) and "accuracy" (training accuracy)
@@ -81,14 +83,23 @@ def train_one_epoch(
     running_loss = 0.0
     correct = 0
     total = 0
+    use_amp = scaler is not None
 
     for images, labels in tqdm(train_loader, desc="Training"):
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+
+        with torch.amp.autocast(device.type, enabled=use_amp):
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+        if use_amp:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
         running_loss += loss.item() * images.size(0)
         _, predicted = outputs.max(1)
@@ -104,6 +115,7 @@ def validate(
     val_loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
+    use_amp: bool = False,
 ) -> dict:
     """
     Evaluate the model on validation data.
@@ -135,8 +147,9 @@ def validate(
 
     for images, labels in tqdm(val_loader, desc="Validating"):
         images, labels = images.to(device), labels.to(device)
-        outputs = model(images)
-        loss = criterion(outputs, labels)
+        with torch.amp.autocast(device.type, enabled=use_amp):
+            outputs = model(images)
+            loss = criterion(outputs, labels)
 
         running_loss += loss.item() * images.size(0)
         _, predicted = outputs.max(1)
@@ -234,6 +247,7 @@ def train(
     save_dir: str | Path = "models/checkpoints",
     device: torch.device | None = None,
     class_names: list[str] | None = None,
+    use_amp: bool = False,
 ) -> dict:
     """
     Full training pipeline.
@@ -266,17 +280,25 @@ def train(
     # 5. Scheduler — reduce LR by 10x every 7 epochs for better convergence
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-    # 6. Ensure save directory exists
+    # 6. Mixed precision scaler (only works on CUDA — ignored on MPS/CPU)
+    use_amp = use_amp and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    if use_amp:
+        print("Mixed precision (AMP) enabled — using FP16 on Tensor Cores")
+
+    # 7. Ensure save directory exists
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 7. Training loop
+    # 8. Training loop
     best_val_acc = 0.0
     history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
 
     for epoch in range(num_epochs):
-        train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        val_metrics = validate(model, val_loader, criterion, device)
+        train_metrics = train_one_epoch(
+            model, train_loader, criterion, optimizer, device, scaler=scaler,
+        )
+        val_metrics = validate(model, val_loader, criterion, device, use_amp=use_amp)
         scheduler.step()
 
         # Print progress
@@ -328,6 +350,10 @@ if __name__ == "__main__":
     #   Tesla T4 (14.6 GB VRAM, 4 CPU cores):
     #     python -m src.training.train --batch-size 176 --num-workers 4
     #
+    #   For maximum throughput, preprocess first to eliminate CPU bottleneck:
+    #     python scripts/preprocess_dataset.py
+    #     python -m src.training.train --batch-size 176 --preprocessed data/nabirds/preprocessed
+    #
     # THE TWO-PHASE TRAINING STRATEGY:
     #
     # Phase 1 — "Teach the new head" (freeze_backbone=True)
@@ -361,7 +387,7 @@ if __name__ == "__main__":
     #
     import argparse
 
-    from src.training.dataset import NABirdsDataset
+    from src.training.dataset import NABirdsDataset, PreprocessedNABirdsDataset
     from src.training.transforms import get_train_transforms, get_val_transforms
     from src.training.model import create_model, unfreeze_backbone, count_parameters
     from src.training.evaluate import plot_training_history
@@ -369,6 +395,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train MobileNetV2 bird classifier")
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
     parser.add_argument("--num-workers", type=int, default=4, help="data loading workers (default: 4)")
+    parser.add_argument(
+        "--preprocessed", type=Path, default=None,
+        help="path to preprocessed dataset (from scripts/preprocess_dataset.py)",
+    )
+    parser.add_argument("--amp", action="store_true", help="enable mixed precision (FP16)")
     args = parser.parse_args()
 
     DATA_DIR = Path("data/nabirds")
@@ -378,8 +409,13 @@ if __name__ == "__main__":
 
     # --- Create datasets with transforms ---
     print("Loading datasets...")
-    train_dataset = NABirdsDataset(DATA_DIR, split="train", transform=get_train_transforms())
-    val_dataset = NABirdsDataset(DATA_DIR, split="test", transform=get_val_transforms())
+    if args.preprocessed:
+        print(f"  Using preprocessed data from {args.preprocessed}")
+        train_dataset = PreprocessedNABirdsDataset(args.preprocessed, split="train")
+        val_dataset = PreprocessedNABirdsDataset(args.preprocessed, split="test")
+    else:
+        train_dataset = NABirdsDataset(DATA_DIR, split="train", transform=get_train_transforms())
+        val_dataset = NABirdsDataset(DATA_DIR, split="test", transform=get_val_transforms())
     print(f"  Train: {len(train_dataset)} images")
     print(f"  Val:   {len(val_dataset)} images")
     print(f"  Classes: {train_dataset.num_classes}")
@@ -412,7 +448,7 @@ if __name__ == "__main__":
     history_phase1 = train(
         model, train_loader, val_loader,
         num_epochs=10, learning_rate=0.001, save_dir=SAVE_DIR,
-        class_names=class_names,
+        class_names=class_names, use_amp=args.amp,
     )
 
     # --- Phase 2: Fine-tune with late backbone layers unfrozen ---
@@ -425,7 +461,7 @@ if __name__ == "__main__":
     history_phase2 = train(
         model, train_loader, val_loader,
         num_epochs=25, learning_rate=0.0001, save_dir=SAVE_DIR,
-        class_names=class_names,
+        class_names=class_names, use_amp=args.amp,
     )
 
     # --- Plot combined training history ---
