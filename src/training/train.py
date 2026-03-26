@@ -147,6 +147,61 @@ def validate(
 
 
 @torch.no_grad()
+def _print_epoch_metrics(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+    class_names: list[str] | None = None,
+    top_confusions: int = 5,
+) -> None:
+    """Print detailed validation metrics after each epoch."""
+    import numpy as np
+    from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+    from src.training.evaluate import get_predictions
+
+    preds, labels, _ = get_predictions(model, val_loader, device)
+
+    # Precision, Recall, F1 (macro-averaged across all species)
+    precision = precision_score(labels, preds, average="macro", zero_division=0)
+    recall = recall_score(labels, preds, average="macro", zero_division=0)
+    f1 = f1_score(labels, preds, average="macro", zero_division=0)
+
+    # Top-5 accuracy: was the correct label in the model's top 5 guesses?
+    # We need the raw outputs for this, so re-run with logits
+    model.eval()
+    top5_correct = 0
+    total = 0
+    for images, targets in val_loader:
+        images = images.to(device)
+        outputs = model(images)
+        _, top5_preds = outputs.topk(5, dim=1)
+        for i in range(len(targets)):
+            if targets[i].item() in top5_preds[i].cpu().tolist():
+                top5_correct += 1
+            total += 1
+    top5_acc = top5_correct / total if total > 0 else 0.0
+
+    print("  --- Validation Metrics ---")
+    print(f"  Precision: {precision:.4f}  Recall: {recall:.4f}  F1: {f1:.4f}")
+    print(f"  Top-5 Accuracy: {top5_acc:.4f}")
+
+    # Top-N most confused species pairs
+    cm = confusion_matrix(labels, preds)
+    np.fill_diagonal(cm, 0)
+    flat_indices = np.argsort(cm, axis=None)[-top_confusions:][::-1]
+    rows, cols = np.unravel_index(flat_indices, cm.shape)
+
+    print(f"  Top {top_confusions} confusions:")
+    for true_idx, pred_idx in zip(rows, cols):
+        count = cm[true_idx, pred_idx]
+        if count == 0:
+            break
+        true_name = class_names[true_idx] if class_names else str(true_idx)
+        pred_name = class_names[pred_idx] if class_names else str(pred_idx)
+        print(f"    {true_name} → {pred_name}: {count}")
+
+
+@torch.no_grad()
 def _save_epoch_confusion_matrix(
     model: nn.Module,
     val_loader: DataLoader,
@@ -200,7 +255,7 @@ def train(
     # 2. Move model to device
     model = model.to(device)
 
-    # 3. Loss function — CrossEntropyLoss is standard for classification
+    # 3. Loss function — standard CrossEntropyLoss for classification
     criterion = nn.CrossEntropyLoss()
 
     # 4. Optimizer — only optimize unfrozen parameters (filter by requires_grad)
@@ -225,9 +280,13 @@ def train(
         scheduler.step()
 
         # Print progress
-        print(f"Epoch {epoch + 1}/{num_epochs}")
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"Epoch {epoch + 1}/{num_epochs} (lr={current_lr:.6f})")
         print(f"  Train Loss: {train_metrics['loss']:.4f}  Acc: {train_metrics['accuracy']:.4f}")
         print(f"  Val   Loss: {val_metrics['loss']:.4f}  Acc: {val_metrics['accuracy']:.4f}")
+
+        # Print detailed metrics for this epoch
+        _print_epoch_metrics(model, val_loader, device, class_names)
 
         # Save confusion matrix for this epoch
         _save_epoch_confusion_matrix(
@@ -331,13 +390,17 @@ if __name__ == "__main__":
     ]
 
     # --- Create DataLoaders ---
+    # pin_memory=True speeds up CPU→GPU transfer, but MPS doesn't support it
+    import torch as _torch
+    use_pin_memory = _torch.cuda.is_available()
+
     train_loader = DataLoader(
         train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=NUM_WORKERS, pin_memory=True,
+        num_workers=NUM_WORKERS, pin_memory=use_pin_memory,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=NUM_WORKERS, pin_memory=True,
+        num_workers=NUM_WORKERS, pin_memory=use_pin_memory,
     )
 
     # --- Phase 1: Train classifier head only (backbone frozen) ---
@@ -353,6 +416,7 @@ if __name__ == "__main__":
     )
 
     # --- Phase 2: Fine-tune with late backbone layers unfrozen ---
+    # Same as run 1 but with 25 epochs instead of 15 (it was still improving when it stopped)
     print("\n=== Phase 2: Fine-tuning (layers 14+ unfrozen, lower LR) ===")
     unfreeze_backbone(model, unfreeze_from=14)
     params = count_parameters(model)
@@ -360,7 +424,7 @@ if __name__ == "__main__":
 
     history_phase2 = train(
         model, train_loader, val_loader,
-        num_epochs=15, learning_rate=0.0001, save_dir=SAVE_DIR,
+        num_epochs=25, learning_rate=0.0001, save_dir=SAVE_DIR,
         class_names=class_names,
     )
 
