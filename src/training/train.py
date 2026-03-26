@@ -262,6 +262,13 @@ if __name__ == "__main__":
     # This block runs when you execute: python -m src.training.train
     # Wire everything together here once you've implemented the pieces above.
     #
+    # GPU-OPTIMIZED TRAINING:
+    #   Increase --batch-size to fill GPU memory (~90% utilization is ideal).
+    #   Set --num-workers to match CPU core count for optimal data loading.
+    #
+    #   Tesla T4 (14.6 GB VRAM, 4 CPU cores):
+    #     python -m src.training.train --batch-size 176 --num-workers 4
+    #
     # THE TWO-PHASE TRAINING STRATEGY:
     #
     # Phase 1 — "Teach the new head" (freeze_backbone=True)
@@ -293,15 +300,22 @@ if __name__ == "__main__":
     # it can no longer classify "school bus" or "pizza", but it CAN distinguish
     # a House Finch from a Purple Finch. That's exactly what we want.
     #
+    import argparse
+
     from src.training.dataset import NABirdsDataset
     from src.training.transforms import get_train_transforms, get_val_transforms
     from src.training.model import create_model, unfreeze_backbone, count_parameters
     from src.training.evaluate import plot_training_history
 
+    parser = argparse.ArgumentParser(description="Train MobileNetV2 bird classifier")
+    parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
+    parser.add_argument("--num-workers", type=int, default=4, help="data loading workers (default: 4)")
+    args = parser.parse_args()
+
     DATA_DIR = Path("data/nabirds")
     SAVE_DIR = Path("models/checkpoints")
-    BATCH_SIZE = 32
-    NUM_WORKERS = 4
+    BATCH_SIZE = args.batch_size
+    NUM_WORKERS = args.num_workers
 
     # --- Create datasets with transforms ---
     print("Loading datasets...")
