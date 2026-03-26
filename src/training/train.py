@@ -146,6 +146,30 @@ def validate(
     return {"loss": running_loss / total, "accuracy": correct / total}
 
 
+@torch.no_grad()
+def _save_epoch_confusion_matrix(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+    epoch: int,
+    save_dir: Path,
+    class_names: list[str] | None = None,
+) -> None:
+    """Generate and save a confusion matrix image for this epoch."""
+    from src.training.evaluate import get_predictions, plot_confusion_matrix
+
+    preds, labels, _ = get_predictions(model, val_loader, device)
+    cm_dir = save_dir / "confusion_matrices"
+    cm_dir.mkdir(parents=True, exist_ok=True)
+    plot_confusion_matrix(
+        labels, preds,
+        class_names=class_names,
+        top_n=20,
+        save_path=cm_dir / f"epoch_{epoch:02d}.png",
+    )
+    print(f"  Confusion matrix saved to {cm_dir / f'epoch_{epoch:02d}.png'}")
+
+
 def train(
     model: nn.Module,
     train_loader: DataLoader,
@@ -154,6 +178,7 @@ def train(
     learning_rate: float = 0.001,
     save_dir: str | Path = "models/checkpoints",
     device: torch.device | None = None,
+    class_names: list[str] | None = None,
 ) -> dict:
     """
     Full training pipeline.
@@ -203,6 +228,11 @@ def train(
         print(f"Epoch {epoch + 1}/{num_epochs}")
         print(f"  Train Loss: {train_metrics['loss']:.4f}  Acc: {train_metrics['accuracy']:.4f}")
         print(f"  Val   Loss: {val_metrics['loss']:.4f}  Acc: {val_metrics['accuracy']:.4f}")
+
+        # Save confusion matrix for this epoch
+        _save_epoch_confusion_matrix(
+            model, val_loader, device, epoch + 1, save_dir, class_names
+        )
 
         # Save best model (by validation accuracy)
         if val_metrics["accuracy"] > best_val_acc:
@@ -263,14 +293,67 @@ if __name__ == "__main__":
     # it can no longer classify "school bus" or "pizza", but it CAN distinguish
     # a House Finch from a Purple Finch. That's exactly what we want.
     #
-    # Rough outline:
-    # 1. from src.training.dataset import NABirdsDataset
-    # 2. from src.training.transforms import get_train_transforms, get_val_transforms
-    # 3. from src.training.model import create_model, unfreeze_backbone
-    # 4. Create datasets with transforms
-    # 5. Create DataLoaders
-    # 6. Create model with freeze_backbone=True
-    # 7. Phase 1: Train for N epochs (classifier head only, lr=0.001)
-    # 8. Phase 2: unfreeze_backbone(model), train for more epochs (lr=0.0001)
-    # 9. Evaluate final model
-    pass
+    from src.training.dataset import NABirdsDataset
+    from src.training.transforms import get_train_transforms, get_val_transforms
+    from src.training.model import create_model, unfreeze_backbone, count_parameters
+    from src.training.evaluate import plot_training_history
+
+    DATA_DIR = Path("data/nabirds")
+    SAVE_DIR = Path("models/checkpoints")
+    BATCH_SIZE = 32
+    NUM_WORKERS = 4
+
+    # --- Create datasets with transforms ---
+    print("Loading datasets...")
+    train_dataset = NABirdsDataset(DATA_DIR, split="train", transform=get_train_transforms())
+    val_dataset = NABirdsDataset(DATA_DIR, split="test", transform=get_val_transforms())
+    print(f"  Train: {len(train_dataset)} images")
+    print(f"  Val:   {len(val_dataset)} images")
+    print(f"  Classes: {train_dataset.num_classes}")
+
+    # Build class names list (index → species name) for confusion matrix labels
+    class_names = [
+        train_dataset.get_species_name(i) for i in range(train_dataset.num_classes)
+    ]
+
+    # --- Create DataLoaders ---
+    train_loader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True,
+        num_workers=NUM_WORKERS, pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=NUM_WORKERS, pin_memory=True,
+    )
+
+    # --- Phase 1: Train classifier head only (backbone frozen) ---
+    print("\n=== Phase 1: Training classifier head (backbone frozen) ===")
+    model = create_model(num_classes=train_dataset.num_classes, pretrained=True, freeze_backbone=True)
+    params = count_parameters(model)
+    print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+
+    history_phase1 = train(
+        model, train_loader, val_loader,
+        num_epochs=10, learning_rate=0.001, save_dir=SAVE_DIR,
+        class_names=class_names,
+    )
+
+    # --- Phase 2: Fine-tune with late backbone layers unfrozen ---
+    print("\n=== Phase 2: Fine-tuning (layers 14+ unfrozen, lower LR) ===")
+    unfreeze_backbone(model, unfreeze_from=14)
+    params = count_parameters(model)
+    print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+
+    history_phase2 = train(
+        model, train_loader, val_loader,
+        num_epochs=15, learning_rate=0.0001, save_dir=SAVE_DIR,
+        class_names=class_names,
+    )
+
+    # --- Plot combined training history ---
+    combined_history = {
+        key: history_phase1[key] + history_phase2[key]
+        for key in history_phase1
+    }
+    plot_training_history(combined_history, save_path=SAVE_DIR / "training_history.png")
+    print("\nTraining complete!")

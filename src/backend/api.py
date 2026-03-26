@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from src.backend.database import (
     Detection,
     Species,
-    WeatherObservation,
     DailySummary,
     get_engine,
     create_tables,
