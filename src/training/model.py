@@ -81,22 +81,10 @@ def create_model(num_classes: int, pretrained: bool = True, freeze_backbone: boo
     Returns:
         Modified MobileNetV2 model
 
-    TODO:
-    1. Load pretrained MobileNetV2:
-       model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
-       (if pretrained=True, otherwise weights=None)
-
-    2. Freeze the backbone (if freeze_backbone=True):
-       Loop through model.features.parameters() and set requires_grad = False
-       This means only the classifier head will be trained initially
-
-    3. Replace the classifier head:
-       The original head is: model.classifier = Sequential(Dropout(0.2), Linear(1280, 1000))
-       Replace it with:      model.classifier = Sequential(Dropout(0.2), Linear(1280, num_classes))
-
-       Access the in_features from the existing layer:
-       in_features = model.classifier[1].in_features  # Should be 1280
-
+    Steps:
+    1. Load pretrained MobileNetV2 (ImageNet weights if pretrained=True)
+    2. Freeze the backbone so only the classifier head trains initially
+    3. Replace the classifier head: Linear(1280, 1000) → Linear(1280, num_classes)
     4. Return the model
     """
     # 1. Load MobileNetV2 with or without ImageNet pretrained weights
@@ -150,13 +138,10 @@ def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
         We want to NUDGE them toward birds, not randomly scramble them.
         Typical strategy: use 1/10th of the Phase 1 learning rate.
 
-    TODO:
-    1. First, freeze everything: set requires_grad=False for all parameters
-    2. Then unfreeze layers from unfreeze_from onwards:
-       for layer in model.features[unfreeze_from:]:
-           for param in layer.parameters():
-               param.requires_grad = True
-    3. Also make sure the classifier head is unfrozen
+    Steps:
+    1. Freeze everything (clean slate)
+    2. Unfreeze layers from unfreeze_from onwards
+    3. Unfreeze the classifier head
     """
     # Step 1: Freeze everything first (clean slate)
     for param in model.parameters():
@@ -176,13 +161,10 @@ def count_parameters(model: nn.Module) -> dict:
     """
     Count trainable vs frozen parameters. Useful for verifying freeze/unfreeze.
 
-    TODO:
-    Return a dict with:
+    Returns a dict with:
     - "total": total number of parameters
     - "trainable": parameters with requires_grad=True
     - "frozen": parameters with requires_grad=False
-
-    Hint: sum(p.numel() for p in model.parameters())
     """
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)

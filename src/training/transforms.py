@@ -56,7 +56,7 @@ def get_train_transforms() -> transforms.Compose:
     """
     Training transforms with data augmentation.
 
-    TODO: Build a transforms.Compose pipeline that includes:
+    Pipeline:
     1. RandomResizedCrop(INPUT_SIZE) — crop random region and resize to 224x224
     2. RandomHorizontalFlip() — 50% chance to mirror horizontally
     3. RandomRotation(15) — rotate up to 15 degrees
@@ -78,7 +78,7 @@ def get_val_transforms() -> transforms.Compose:
     """
     Validation/test transforms — NO randomness.
 
-    TODO: Build a transforms.Compose pipeline that includes:
+    Pipeline:
     1. Resize(256) — resize shortest edge to 256
     2. CenterCrop(INPUT_SIZE) — deterministic center crop to 224x224
     3. transforms.ToTensor()
