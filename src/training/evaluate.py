@@ -37,21 +37,24 @@ def get_predictions(
     Returns:
         (all_predictions, all_labels, all_confidences)
 
-    TODO:
+    Steps:
     1. Set model to eval mode
-    2. Collect all predictions, true labels, and confidence scores:
-       all_preds, all_labels, all_confs = [], [], []
-       for images, labels in data_loader:
-           images = images.to(device)
-           outputs = model(images)
-           probabilities = torch.softmax(outputs, dim=1)
-           confidences, predicted = probabilities.max(1)
-           all_preds.extend(predicted.cpu().numpy())
-           all_labels.extend(labels.numpy())
-           all_confs.extend(confidences.cpu().numpy())
-    3. Return as numpy arrays
+    2. Run all data through the model, collecting predictions and confidences
+    3. Return as numpy arrays for use with sklearn metrics
     """
-    raise NotImplementedError("Implement me!")
+    model.eval()
+    all_preds, all_labels, all_confs = [], [], []
+
+    for images, labels in data_loader:
+        images = images.to(device)
+        outputs = model(images)
+        probabilities = torch.softmax(outputs, dim=1)
+        confidences, predicted = probabilities.max(1)
+        all_preds.extend(predicted.cpu().numpy())
+        all_labels.extend(labels.numpy())
+        all_confs.extend(confidences.cpu().numpy())
+
+    return np.array(all_preds), np.array(all_labels), np.array(all_confs)
 
 
 def print_classification_report(
@@ -62,14 +65,11 @@ def print_classification_report(
     """
     Print precision, recall, F1 for each species.
 
-    TODO:
-    1. from sklearn.metrics import classification_report
-    2. Print classification_report(y_true, y_pred, target_names=class_names)
-
     The output shows per-species metrics. Look for species with low recall —
     those are the ones your model misses most often.
     """
-    raise NotImplementedError("Implement me!")
+    from sklearn.metrics import classification_report
+    print(classification_report(y_true, y_pred, target_names=class_names, zero_division=0))
 
 
 def plot_confusion_matrix(
@@ -86,24 +86,45 @@ def plot_confusion_matrix(
     1. Find the top-N species with the most misclassifications
     2. Plot only those species in the matrix
 
-    TODO:
-    1. from sklearn.metrics import confusion_matrix
-    2. cm = confusion_matrix(y_true, y_pred)
-    3. Find species with most errors:
-       errors_per_class = cm.sum(axis=1) - cm.diagonal()
-       top_confused = np.argsort(errors_per_class)[-top_n:]
-    4. Extract the sub-matrix for those species
-    5. Plot with seaborn.heatmap:
-       import seaborn as sns
-       import matplotlib.pyplot as plt
-       fig, ax = plt.subplots(figsize=(12, 10))
-       sns.heatmap(sub_cm, annot=True, fmt="d", xticklabels=..., yticklabels=...)
-       plt.title("Most Confused Species")
-       plt.ylabel("True Species")
-       plt.xlabel("Predicted Species")
-    6. Save or show the plot
+    Steps:
+    1. Compute full confusion matrix
+    2. Find species with most misclassifications
+    3. Extract and plot the sub-matrix for those species
     """
-    raise NotImplementedError("Implement me!")
+    from sklearn.metrics import confusion_matrix
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
+    cm = confusion_matrix(y_true, y_pred)
+
+    # Find the top-N species with the most errors
+    errors_per_class = cm.sum(axis=1) - cm.diagonal()
+    top_confused = np.argsort(errors_per_class)[-top_n:]
+
+    # Extract sub-matrix for just those species
+    sub_cm = cm[np.ix_(top_confused, top_confused)]
+
+    # Build labels for the axes
+    if class_names is not None:
+        sub_labels = [class_names[i] for i in top_confused]
+    else:
+        sub_labels = [str(i) for i in top_confused]
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    sns.heatmap(sub_cm, annot=True, fmt="d", xticklabels=sub_labels, yticklabels=sub_labels, ax=ax)
+    ax.set_title(f"Top {top_n} Most Confused Species")
+    ax.set_ylabel("True Species")
+    ax.set_xlabel("Predicted Species")
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+        print(f"Confusion matrix saved to {save_path}")
+    else:
+        plt.show()
+    plt.close()
 
 
 def plot_training_history(history: dict, save_path: str | Path | None = None) -> None:
@@ -120,14 +141,42 @@ def plot_training_history(history: dict, save_path: str | Path | None = None) ->
     - If val_loss starts rising while train_loss drops: overfitting has begun
       → The epoch just before val_loss rose is your best stopping point
 
-    TODO:
-    1. Create a figure with 2 subplots side by side
-    2. Left: plot train_loss and val_loss vs epoch
-    3. Right: plot train_acc and val_acc vs epoch
-    4. Add legends, labels, title
-    5. Save or show
+    Steps:
+    1. Left subplot: train_loss vs val_loss — watch for divergence (overfitting)
+    2. Right subplot: train_acc vs val_acc — watch for gap widening (overfitting)
     """
-    raise NotImplementedError("Implement me!")
+    import matplotlib.pyplot as plt
+
+    epochs = range(1, len(history["train_loss"]) + 1)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Loss curves
+    ax1.plot(epochs, history["train_loss"], label="Train Loss")
+    ax1.plot(epochs, history["val_loss"], label="Val Loss")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss")
+    ax1.set_title("Loss Over Training")
+    ax1.legend()
+    ax1.grid(True)
+
+    # Accuracy curves
+    ax2.plot(epochs, history["train_acc"], label="Train Accuracy")
+    ax2.plot(epochs, history["val_acc"], label="Val Accuracy")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Accuracy")
+    ax2.set_title("Accuracy Over Training")
+    ax2.legend()
+    ax2.grid(True)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+        print(f"Training history saved to {save_path}")
+    else:
+        plt.show()
+    plt.close()
 
 
 def find_worst_predictions(
@@ -143,14 +192,32 @@ def find_worst_predictions(
     These are the most informative errors — they tell you what the model
     is fundamentally confused about.
 
-    TODO:
-    Return a list of dicts with:
-    - "image_path": path to the image
-    - "true_species": actual species name
-    - "predicted_species": what the model guessed
-    - "confidence": how confident the model was (higher = worse mistake)
-
-    This is a BONUS exercise. It's more advanced but very useful for
-    understanding your model's failure modes.
+    Returns a list of dicts with image_path, true_species, predicted_species,
+    and confidence. Sorted by confidence descending — the most confidently
+    wrong predictions are the most informative for understanding failure modes.
     """
-    raise NotImplementedError("Implement me (bonus)!")
+    model.eval()
+    wrong_preds = []
+
+    with torch.no_grad():
+        for batch_idx, (images, labels) in enumerate(data_loader):
+            images = images.to(device)
+            outputs = model(images)
+            probabilities = torch.softmax(outputs, dim=1)
+            confidences, predicted = probabilities.max(1)
+
+            for i in range(len(labels)):
+                if predicted[i].item() != labels[i].item():
+                    # Calculate the original index into the dataset
+                    sample_idx = batch_idx * data_loader.batch_size + i
+                    image_path, _ = dataset.samples[sample_idx]
+                    wrong_preds.append({
+                        "image_path": str(image_path),
+                        "true_species": dataset.get_species_name(labels[i].item()),
+                        "predicted_species": dataset.get_species_name(predicted[i].item()),
+                        "confidence": confidences[i].item(),
+                    })
+
+    # Sort by confidence descending — most confident mistakes first
+    wrong_preds.sort(key=lambda x: x["confidence"], reverse=True)
+    return wrong_preds[:n]

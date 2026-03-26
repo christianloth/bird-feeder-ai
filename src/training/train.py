@@ -71,25 +71,31 @@ def train_one_epoch(
     The loss DRIVES learning — gradients flow backward and the optimizer adjusts
     weights to reduce it.
 
-    TODO:
-    1. Set model to training mode: model.train()
-    2. Initialize running_loss = 0.0 and correct = 0 and total = 0
-    3. Loop over train_loader with tqdm for a progress bar:
-       for images, labels in tqdm(train_loader, desc="Training"):
-           a. Move to device: images, labels = images.to(device), labels.to(device)
-           b. Zero gradients: optimizer.zero_grad()
-           c. Forward pass: outputs = model(images)
-           d. Compute loss: loss = criterion(outputs, labels)
-           e. Backward pass: loss.backward()
-           f. Update weights: optimizer.step()
-           g. Track metrics:
-              running_loss += loss.item() * images.size(0)
-              _, predicted = outputs.max(1)
-              total += labels.size(0)
-              correct += predicted.eq(labels).sum().item()
-    4. Return {"loss": running_loss / total, "accuracy": correct / total}
+    Steps:
+    1. Set model to training mode (enables dropout, batch norm training behavior)
+    2. For each batch: forward pass → compute loss → backward pass → update weights
+    3. Track running loss and accuracy across all batches
+    4. Return averaged metrics for this epoch
     """
-    raise NotImplementedError("Implement me!")
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    for images, labels in tqdm(train_loader, desc="Training"):
+        images, labels = images.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item() * images.size(0)
+        _, predicted = outputs.max(1)
+        total += labels.size(0)
+        correct += predicted.eq(labels).sum().item()
+
+    return {"loss": running_loss / total, "accuracy": correct / total}
 
 
 @torch.no_grad()  # Disables gradient computation — saves memory during evaluation
@@ -117,17 +123,27 @@ def validate(
     training images instead of learning general bird features. That's your signal
     to stop training or add more augmentation.
 
-    TODO:
-    1. Set model to eval mode: model.eval()
-       (This disables dropout and uses running stats for batch norm)
-    2. Same loop as training BUT:
-       - No optimizer.zero_grad()
-       - No loss.backward()
-       - No optimizer.step()
-       - Just forward pass and track metrics
-    3. Return {"loss": ..., "accuracy": ...}
+    Steps:
+    1. Set model to eval mode (disables dropout, uses running batch norm stats)
+    2. Same loop as training but NO backprop — just forward pass and track metrics
+    3. Return averaged metrics
     """
-    raise NotImplementedError("Implement me!")
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    for images, labels in tqdm(val_loader, desc="Validating"):
+        images, labels = images.to(device), labels.to(device)
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+
+        running_loss += loss.item() * images.size(0)
+        _, predicted = outputs.max(1)
+        total += labels.size(0)
+        correct += predicted.eq(labels).sum().item()
+
+    return {"loss": running_loss / total, "accuracy": correct / total}
 
 
 def train(
@@ -142,58 +158,74 @@ def train(
     """
     Full training pipeline.
 
-    TODO:
-    1. Set up device (cuda > mps > cpu)
-
-    2. Move model to device: model = model.to(device)
-
-    3. Set up loss function:
-       criterion = nn.CrossEntropyLoss()
-       (CrossEntropyLoss combines LogSoftmax + NLLLoss — standard for classification)
-
-    4. Set up optimizer:
-       optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate)
-       NOTE: filter(requires_grad) ensures we only optimize unfrozen parameters
-
-    5. Set up learning rate scheduler:
-       scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
-       (Reduces LR by 10x every 7 epochs — helps convergence)
-
-    6. Training loop:
-       best_val_acc = 0.0
-       history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
-
-       for epoch in range(num_epochs):
-           train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
-           val_metrics = validate(model, val_loader, criterion, device)
-           scheduler.step()
-
-           # Print progress
-           print(f"Epoch {epoch+1}/{num_epochs}")
-           print(f"  Train Loss: {train_metrics['loss']:.4f}  Acc: {train_metrics['accuracy']:.4f}")
-           print(f"  Val   Loss: {val_metrics['loss']:.4f}  Acc: {val_metrics['accuracy']:.4f}")
-
-           # Save best model
-           if val_metrics["accuracy"] > best_val_acc:
-               best_val_acc = val_metrics["accuracy"]
-               torch.save(model.state_dict(), save_dir / "best_model.pth")
-               print(f"  Saved best model (val_acc={best_val_acc:.4f})")
-
-           # Append to history
-           ...
-
-       return history
-
-    7. BONUS: Save a training checkpoint with more info:
-       torch.save({
-           "epoch": epoch,
-           "model_state_dict": model.state_dict(),
-           "optimizer_state_dict": optimizer.state_dict(),
-           "best_val_acc": best_val_acc,
-           "history": history,
-       }, save_dir / "checkpoint.pth")
+    Steps:
+    1. Set up device, loss function, optimizer, and LR scheduler
+    2. Run training loop: train one epoch → validate → save best model
+    3. Return training history for plotting
     """
-    raise NotImplementedError("Implement me!")
+    # 1. Device setup (cuda > mps > cpu)
+    if device is None:
+        device = torch.device(
+            "cuda" if torch.cuda.is_available()
+            else "mps" if torch.backends.mps.is_available()
+            else "cpu"
+        )
+    print(f"Using device: {device}")
+
+    # 2. Move model to device
+    model = model.to(device)
+
+    # 3. Loss function — CrossEntropyLoss is standard for classification
+    criterion = nn.CrossEntropyLoss()
+
+    # 4. Optimizer — only optimize unfrozen parameters (filter by requires_grad)
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate
+    )
+
+    # 5. Scheduler — reduce LR by 10x every 7 epochs for better convergence
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+
+    # 6. Ensure save directory exists
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # 7. Training loop
+    best_val_acc = 0.0
+    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
+
+    for epoch in range(num_epochs):
+        train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        val_metrics = validate(model, val_loader, criterion, device)
+        scheduler.step()
+
+        # Print progress
+        print(f"Epoch {epoch + 1}/{num_epochs}")
+        print(f"  Train Loss: {train_metrics['loss']:.4f}  Acc: {train_metrics['accuracy']:.4f}")
+        print(f"  Val   Loss: {val_metrics['loss']:.4f}  Acc: {val_metrics['accuracy']:.4f}")
+
+        # Save best model (by validation accuracy)
+        if val_metrics["accuracy"] > best_val_acc:
+            best_val_acc = val_metrics["accuracy"]
+            torch.save(model.state_dict(), save_dir / "best_model.pth")
+            print(f"  Saved best model (val_acc={best_val_acc:.4f})")
+
+        # Append to history
+        history["train_loss"].append(train_metrics["loss"])
+        history["train_acc"].append(train_metrics["accuracy"])
+        history["val_loss"].append(val_metrics["loss"])
+        history["val_acc"].append(val_metrics["accuracy"])
+
+    # Save final checkpoint with full state (allows resuming training)
+    torch.save({
+        "epoch": num_epochs,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "best_val_acc": best_val_acc,
+        "history": history,
+    }, save_dir / "checkpoint.pth")
+
+    return history
 
 
 if __name__ == "__main__":
