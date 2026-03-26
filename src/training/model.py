@@ -99,7 +99,23 @@ def create_model(num_classes: int, pretrained: bool = True, freeze_backbone: boo
 
     4. Return the model
     """
-    raise NotImplementedError("Implement me!")
+    # 1. Load MobileNetV2 with or without ImageNet pretrained weights
+    weights = models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
+    model = models.mobilenet_v2(weights=weights)
+
+    # 2. Freeze the backbone so only the classifier head trains in Phase 1
+    if freeze_backbone:
+        for param in model.features.parameters():
+            param.requires_grad = False
+
+    # 3. Replace the classifier head: Linear(1280, 1000) → Linear(1280, num_classes)
+    in_features = model.classifier[1].in_features  # 1280
+    model.classifier = nn.Sequential(
+        nn.Dropout(0.2),
+        nn.Linear(in_features, num_classes),
+    )
+
+    return model
 
 
 def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
@@ -142,7 +158,18 @@ def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
                param.requires_grad = True
     3. Also make sure the classifier head is unfrozen
     """
-    raise NotImplementedError("Implement me!")
+    # Step 1: Freeze everything first (clean slate)
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Step 2: Unfreeze late backbone layers (14-17)
+    for layer in model.features[unfreeze_from:]:
+        for param in layer.parameters():
+            param.requires_grad = True
+
+    # Step 3: Unfreeze the classifier head (always needs to be trainable)
+    for param in model.classifier.parameters():
+        param.requires_grad = True
 
 
 def count_parameters(model: nn.Module) -> dict:
@@ -157,4 +184,10 @@ def count_parameters(model: nn.Module) -> dict:
 
     Hint: sum(p.numel() for p in model.parameters())
     """
-    raise NotImplementedError("Implement me!")
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return {
+        "total": total,
+        "trainable": trainable,
+        "frozen": total - trainable,
+    }
