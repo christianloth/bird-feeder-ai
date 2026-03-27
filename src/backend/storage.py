@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -68,14 +69,23 @@ class ImageStorage:
 
         # Add padding, clamp to frame bounds
         h, w = frame.shape[:2]
-        x1 = max(0, x1 - padding)
-        y1 = max(0, y1 - padding)
-        x2 = min(w, x2 + padding)
-        y2 = min(h, y2 + padding)
+        pad_x1 = max(0, x1 - padding)
+        pad_y1 = max(0, y1 - padding)
+        pad_x2 = min(w, x2 + padding)
+        pad_y2 = min(h, y2 + padding)
 
-        # Crop from frame (OpenCV uses BGR, PIL expects RGB)
-        crop_bgr = frame[y1:y2, x1:x2]
-        crop_rgb = crop_bgr[:, :, ::-1]  # BGR → RGB
+        # Crop from frame with bounding box drawn
+        crop_bgr = frame[pad_y1:pad_y2, pad_x1:pad_x2].copy()
+
+        # Draw red bounding box on the crop (offset bbox coords to crop space)
+        box_x1 = x1 - pad_x1
+        box_y1 = y1 - pad_y1
+        box_x2 = x2 - pad_x1
+        box_y2 = y2 - pad_y1
+        cv2.rectangle(crop_bgr, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 255), 2)
+
+        # BGR → RGB for PIL
+        crop_rgb = crop_bgr[:, :, ::-1]
         img = Image.fromarray(crop_rgb)
 
         # Build paths
