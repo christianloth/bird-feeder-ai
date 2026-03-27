@@ -1,9 +1,32 @@
 """
 Application settings. Edit these values for your setup.
+
+Camera credentials are loaded from config/camera.yaml (gitignored).
 """
 
+import yaml
 from pydantic_settings import BaseSettings
 from pathlib import Path
+
+
+def _load_camera_config() -> dict:
+    """Load camera credentials from camera.yaml."""
+    camera_yaml = Path(__file__).parent / "camera.yaml"
+    if camera_yaml.exists():
+        with open(camera_yaml) as f:
+            config = yaml.safe_load(f)
+        cam = config.get("camera", {})
+        stream_path = cam.get("main_stream", "/11") if cam.get("stream") == "main" else cam.get("sub_stream", "/12")
+        return {
+            "rtsp_url": f"rtsp://{cam['username']}:{cam['password']}@{cam['ip']}:{cam.get('rtsp_port', 554)}{stream_path}",
+            "camera_ip": cam.get("ip", ""),
+            "camera_username": cam.get("username", ""),
+            "camera_password": cam.get("password", ""),
+        }
+    return {}
+
+
+_camera_config = _load_camera_config()
 
 
 class Settings(BaseSettings):
@@ -14,7 +37,7 @@ class Settings(BaseSettings):
     detections_dir: Path = project_root / "detections"
 
     # Camera
-    rtsp_url: str = "rtsp://admin:password@192.168.1.100:554/stream1"
+    rtsp_url: str = _camera_config.get("rtsp_url", "rtsp://admin:password@192.168.1.100:554/11")
     camera_resolution: tuple[int, int] = (1920, 1080)
     inference_resolution: tuple[int, int] = (640, 640)
 
