@@ -30,9 +30,15 @@ def get_predictions(
     model: nn.Module,
     data_loader: DataLoader,
     device: torch.device,
+    return_confidences: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Get all predictions and true labels from a DataLoader.
+
+    Args:
+        return_confidences: If True, compute softmax to get confidence percentages.
+            If False, skip softmax (faster) — confidences array will be empty.
+            Predictions are the same either way (argmax on logits == argmax on softmax).
 
     Returns:
         (all_predictions, all_labels, all_confidences)
@@ -48,11 +54,14 @@ def get_predictions(
     for images, labels in data_loader:
         images = images.to(device)
         outputs = model(images)
-        probabilities = torch.softmax(outputs, dim=1)
-        confidences, predicted = probabilities.max(1)
+        if return_confidences:
+            probabilities = torch.softmax(outputs, dim=1)
+            confidences, predicted = probabilities.max(1)
+            all_confs.extend(confidences.cpu().numpy())
+        else:
+            _, predicted = outputs.max(1)
         all_preds.extend(predicted.cpu().numpy())
         all_labels.extend(labels.numpy())
-        all_confs.extend(confidences.cpu().numpy())
 
     return np.array(all_preds), np.array(all_labels), np.array(all_confs)
 
@@ -78,6 +87,7 @@ def plot_confusion_matrix(
     class_names: list[str] | None = None,
     top_n: int = 20,
     save_path: str | Path | None = None,
+    cm: np.ndarray | None = None,
 ) -> None:
     """
     Plot a confusion matrix for the top-N most confused species.
@@ -86,16 +96,20 @@ def plot_confusion_matrix(
     1. Find the top-N species with the most misclassifications
     2. Plot only those species in the matrix
 
+    Args:
+        cm: Pre-computed confusion matrix. If None, computes it from y_true/y_pred.
+
     Steps:
-    1. Compute full confusion matrix
+    1. Compute full confusion matrix (or use pre-computed)
     2. Find species with most misclassifications
     3. Extract and plot the sub-matrix for those species
     """
-    from sklearn.metrics import confusion_matrix
+    from sklearn.metrics import confusion_matrix as compute_cm
     import seaborn as sns
     import matplotlib.pyplot as plt
 
-    cm = confusion_matrix(y_true, y_pred)
+    if cm is None:
+        cm = compute_cm(y_true, y_pred)
 
     # Find the top-N species with the most errors
     errors_per_class = cm.sum(axis=1) - cm.diagonal()

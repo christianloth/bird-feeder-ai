@@ -160,42 +160,90 @@ def validate(
 
 
 @torch.no_grad()
-def _print_epoch_metrics(
+def _validate_and_predict(
     model: nn.Module,
     val_loader: DataLoader,
+    criterion: nn.Module,
     device: torch.device,
+    use_amp: bool = False,
+) -> dict:
+    """
+    Run model on entire validation set in a SINGLE pass. Computes everything:
+    loss, accuracy, predictions, and top-5 accuracy. No redundant passes needed.
+
+    Returns dict with: loss, accuracy, preds (numpy), labels (numpy), top5_acc
+    """
+    import numpy as np
+
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    top5_correct = 0
+    all_preds = []
+    all_labels = []
+
+    for images, targets in tqdm(val_loader, desc="Validating"):
+        images, targets_dev = images.to(device), targets.to(device)
+        with torch.amp.autocast(device.type, enabled=use_amp):
+            outputs = model(images)
+            loss = criterion(outputs, targets_dev)
+
+        # Loss
+        running_loss += loss.item() * images.size(0)
+
+        # Top-1 predictions (argmax on logits — same as softmax then argmax)
+        _, predicted = outputs.max(1)
+        correct += predicted.eq(targets_dev).sum().item()
+        total += targets.size(0)
+
+        # Collect predictions for sklearn metrics
+        all_preds.extend(predicted.cpu().numpy())
+        all_labels.extend(targets.numpy())
+
+        # Top-5 accuracy (vectorized)
+        _, top5_preds = outputs.topk(5, dim=1)
+        top5_correct += (targets_dev.unsqueeze(1) == top5_preds).any(dim=1).sum().item()
+
+    return {
+        "loss": running_loss / total,
+        "accuracy": correct / total,
+        "preds": np.array(all_preds),
+        "labels": np.array(all_labels),
+        "top5_acc": top5_correct / total if total > 0 else 0.0,
+    }
+
+
+def _print_and_save_epoch_metrics(
+    preds,
+    labels,
+    top5_acc: float,
+    epoch: int,
+    save_dir: Path,
     class_names: list[str] | None = None,
     top_confusions: int = 5,
 ) -> None:
-    """Print detailed validation metrics after each epoch."""
-    import numpy as np
-    from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
-    from src.training.evaluate import get_predictions
+    """Print detailed validation metrics and save confusion matrix.
 
-    preds, labels, _ = get_predictions(model, val_loader, device)
+    Computes the confusion matrix ONCE and uses it for both the top-confusions
+    printout and the saved confusion matrix image.
+    """
+    import numpy as np
+    from sklearn.metrics import (
+        precision_score, recall_score, f1_score,
+        precision_recall_fscore_support, confusion_matrix,
+    )
+    from src.training.evaluate import plot_confusion_matrix
+
+    # Confusion matrix — computed ONCE, used for both printing and plotting
+    cm = confusion_matrix(labels, preds)
 
     # Precision, Recall, F1 (macro-averaged across all species)
     precision = precision_score(labels, preds, average="macro", zero_division=0)
     recall = recall_score(labels, preds, average="macro", zero_division=0)
     f1 = f1_score(labels, preds, average="macro", zero_division=0)
 
-    # Top-5 accuracy: was the correct label in the model's top 5 guesses?
-    # We need the raw outputs for this, so re-run with logits
-    model.eval()
-    top5_correct = 0
-    total = 0
-    for images, targets in val_loader:
-        images = images.to(device)
-        outputs = model(images)
-        _, top5_preds = outputs.topk(5, dim=1)
-        for i in range(len(targets)):
-            if targets[i].item() in top5_preds[i].cpu().tolist():
-                top5_correct += 1
-            total += 1
-    top5_acc = top5_correct / total if total > 0 else 0.0
-
     # Per-class precision, recall, F1 for finding worst classes
-    from sklearn.metrics import precision_recall_fscore_support
     per_precision, per_recall, per_f1, per_support = precision_recall_fscore_support(
         labels, preds, average=None, zero_division=0,
     )
@@ -217,43 +265,29 @@ def _print_epoch_metrics(
     print("  Worst 5 classes (by F1)  [TP=correct, FP=wrongly called this, FN=missed]:")
     for idx in worst_indices:
         name = class_names[idx] if class_names else str(idx)
-        tp = int(per_precision[idx] * per_support[idx]) if per_precision[idx] > 0 else 0
+        tp = int(per_recall[idx] * per_support[idx]) if per_recall[idx] > 0 else 0
         fn = int(per_support[idx] - tp)
-        # FP: times this class was predicted but was wrong
         fp = int(((preds == idx) & (labels != idx)).sum())
         print(f"    {name}: TP={tp} FP={fp} FN={fn} "
               f"P={per_precision[idx]:.2f} R={per_recall[idx]:.2f} F1={per_f1[idx]:.2f} "
               f"(n={int(per_support[idx])})")
 
-    # Top-N most confused species pairs
-    cm = confusion_matrix(labels, preds)
-    np.fill_diagonal(cm, 0)
-    flat_indices = np.argsort(cm, axis=None)[-top_confusions:][::-1]
-    rows, cols = np.unravel_index(flat_indices, cm.shape)
+    # Top-N most confused species pairs (reuses cm computed above)
+    cm_offdiag = cm.copy()
+    np.fill_diagonal(cm_offdiag, 0)
+    flat_indices = np.argsort(cm_offdiag, axis=None)[-top_confusions:][::-1]
+    rows, cols = np.unravel_index(flat_indices, cm_offdiag.shape)
 
     print(f"  Top {top_confusions} confusions:")
     for true_idx, pred_idx in zip(rows, cols):
-        count = cm[true_idx, pred_idx]
+        count = cm_offdiag[true_idx, pred_idx]
         if count == 0:
             break
         true_name = class_names[true_idx] if class_names else str(true_idx)
         pred_name = class_names[pred_idx] if class_names else str(pred_idx)
         print(f"    {true_name} → {pred_name}: {count}")
 
-
-@torch.no_grad()
-def _save_epoch_confusion_matrix(
-    model: nn.Module,
-    val_loader: DataLoader,
-    device: torch.device,
-    epoch: int,
-    save_dir: Path,
-    class_names: list[str] | None = None,
-) -> None:
-    """Generate and save a confusion matrix image for this epoch."""
-    from src.training.evaluate import get_predictions, plot_confusion_matrix
-
-    preds, labels, _ = get_predictions(model, val_loader, device)
+    # Save confusion matrix image (passes pre-computed cm — no recomputation)
     cm_dir = save_dir / "confusion_matrices"
     cm_dir.mkdir(parents=True, exist_ok=True)
     plot_confusion_matrix(
@@ -261,6 +295,7 @@ def _save_epoch_confusion_matrix(
         class_names=class_names,
         top_n=20,
         save_path=cm_dir / f"epoch_{epoch:02d}.png",
+        cm=cm,
     )
     print(f"  Confusion matrix saved to {cm_dir / f'epoch_{epoch:02d}.png'}")
 
@@ -346,8 +381,6 @@ def train(
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        # Only restore scheduler state if the type matches. A StepLR state dict
-        # will silently load into ReduceLROnPlateau but produce wrong behavior.
         saved_scheduler = checkpoint.get("scheduler_type", "step_lr")
         if saved_scheduler == scheduler_type:
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -361,64 +394,80 @@ def train(
     # 9. Early stopping setup
     epochs_without_improvement = 0
 
-    # 10. Training loop
-    for epoch in range(start_epoch, num_epochs):
-        train_metrics = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, scaler=scaler,
-        )
-        val_metrics = validate(model, val_loader, criterion, device, use_amp=use_amp)
+    # 10. Training loop — wrapped in try/finally so saves happen even on Ctrl+C
+    try:
+        for epoch in range(start_epoch, num_epochs):
+            train_metrics = train_one_epoch(
+                model, train_loader, criterion, optimizer, device, scaler=scaler,
+            )
 
-        # Step the scheduler (ReduceLROnPlateau needs the metric, StepLR does not)
-        if scheduler_type == "reduce_on_plateau":
-            scheduler.step(val_metrics["accuracy"])
-        else:
-            scheduler.step()
+            # Single validation pass — computes loss, accuracy, predictions, and top-5
+            val_results = _validate_and_predict(
+                model, val_loader, criterion, device, use_amp=use_amp,
+            )
 
-        # Print progress
-        current_lr = optimizer.param_groups[0]["lr"]
-        print(f"Epoch {epoch + 1}/{num_epochs} (lr={current_lr:.6f})")
-        print(f"  Train Loss: {train_metrics['loss']:.4f}  Acc: {train_metrics['accuracy']:.4f}")
-        print(f"  Val   Loss: {val_metrics['loss']:.4f}  Acc: {val_metrics['accuracy']:.4f}")
+            # Step the scheduler (ReduceLROnPlateau needs the metric, StepLR does not)
+            if scheduler_type == "reduce_on_plateau":
+                scheduler.step(val_results["accuracy"])
+            else:
+                scheduler.step()
 
-        # Print detailed metrics for this epoch
-        _print_epoch_metrics(model, val_loader, device, class_names)
+            # Print progress
+            current_lr = optimizer.param_groups[0]["lr"]
+            print(f"Epoch {epoch + 1}/{num_epochs} (lr={current_lr:.6f})")
+            print(f"  Train Loss: {train_metrics['loss']:.4f}  Acc: {train_metrics['accuracy']:.4f}")
+            print(f"  Val   Loss: {val_results['loss']:.4f}  Acc: {val_results['accuracy']:.4f}")
 
-        # Save confusion matrix for this epoch
-        _save_epoch_confusion_matrix(
-            model, val_loader, device, epoch + 1, save_dir, class_names
-        )
+            # Print detailed metrics and save confusion matrix
+            # (uses pre-computed predictions — no extra inference, confusion matrix computed once)
+            _print_and_save_epoch_metrics(
+                val_results["preds"], val_results["labels"],
+                val_results["top5_acc"], epoch + 1, save_dir, class_names,
+            )
 
-        # Save best model (by validation accuracy)
-        if val_metrics["accuracy"] > best_val_acc:
-            best_val_acc = val_metrics["accuracy"]
-            epochs_without_improvement = 0
-            torch.save(model.state_dict(), save_dir / "best_model.pth")
-            print(f"  Saved best model (val_acc={best_val_acc:.4f})")
-        else:
-            epochs_without_improvement += 1
+            # Save best model for this run (by validation accuracy)
+            if val_results["accuracy"] > best_val_acc:
+                best_val_acc = val_results["accuracy"]
+                epochs_without_improvement = 0
+                tmp_path = save_dir / "best_model.pth.tmp"
+                torch.save(model.state_dict(), tmp_path)
+                tmp_path.rename(save_dir / "best_model.pth")
+                print(f"  Saved best model (val_acc={best_val_acc:.4f})")
+            else:
+                epochs_without_improvement += 1
 
-        # Append to history
-        history["train_loss"].append(train_metrics["loss"])
-        history["train_acc"].append(train_metrics["accuracy"])
-        history["val_loss"].append(val_metrics["loss"])
-        history["val_acc"].append(val_metrics["accuracy"])
+            # Append to history
+            history["train_loss"].append(train_metrics["loss"])
+            history["train_acc"].append(train_metrics["accuracy"])
+            history["val_loss"].append(val_results["loss"])
+            history["val_acc"].append(val_results["accuracy"])
 
-        # Save checkpoint after EVERY epoch (allows resuming if training crashes)
-        torch.save({
-            "epoch": epoch + 1,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scheduler_state_dict": scheduler.state_dict(),
-            "scheduler_type": scheduler_type,
-            "best_val_acc": best_val_acc,
-            "history": history,
-        }, save_dir / "checkpoint.pth")
+            # Save checkpoint after EVERY epoch (atomic: write to tmp then rename)
+            tmp_ckpt = save_dir / "checkpoint.pth.tmp"
+            torch.save({
+                "epoch": epoch + 1,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "scheduler_type": scheduler_type,
+                "best_val_acc": best_val_acc,
+                "history": history,
+            }, tmp_ckpt)
+            tmp_ckpt.rename(save_dir / "checkpoint.pth")
 
-        # Early stopping check
-        if patience is not None and epochs_without_improvement >= patience:
-            print(f"\n  Early stopping: no improvement for {patience} epochs. "
-                  f"Best val_acc={best_val_acc:.4f}")
-            break
+            # Early stopping check
+            if patience is not None and epochs_without_improvement >= patience:
+                print(f"\n  Early stopping: no improvement for {patience} epochs. "
+                      f"Best val_acc={best_val_acc:.4f}")
+                break
+
+    except KeyboardInterrupt:
+        print(f"\n\nTraining interrupted at epoch {epoch + 1}.")
+
+    finally:
+        # Clean up any leftover tmp files from interrupted saves
+        for tmp in save_dir.glob("*.pth.tmp"):
+            tmp.unlink()
 
     return history
 
@@ -480,9 +529,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train bird species classifier")
     parser.add_argument(
-        "--model", type=str, default="mobilenetv2",
+        "--model", type=str, default="efficientnet_b2",
         choices=["mobilenetv2", "efficientnet_b2"],
-        help="model architecture (default: mobilenetv2)",
+        help="model architecture (default: efficientnet_b2)",
     )
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
     parser.add_argument("--num-workers", type=int, default=4, help="data loading workers (default: 4)")
@@ -505,12 +554,30 @@ if __name__ == "__main__":
     model_config = get_model_config(args.model)
     input_size = model_config["input_size"]
 
+    from datetime import datetime
+
     DATA_DIR = Path("data/nabirds")
-    SAVE_DIR = Path("models/checkpoints") / args.model  # separate dirs per model
+    MODEL_DIR = Path("models/checkpoints") / args.model
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers
 
+    # Each training run gets its own timestamped folder.
+    # --resume finds the latest run's checkpoint automatically.
+    if args.resume:
+        # Find the latest run folder with a checkpoint
+        run_dirs = sorted(MODEL_DIR.glob("*/checkpoint.pth"))
+        if run_dirs:
+            SAVE_DIR = run_dirs[-1].parent
+            print(f"Resuming from: {SAVE_DIR}")
+        else:
+            print("Warning: --resume specified but no run with checkpoint.pth found. Starting fresh.")
+            SAVE_DIR = MODEL_DIR / datetime.now().strftime("%Y-%m-%d_%H-%M")
+            args.resume = False  # no checkpoint to resume from
+    else:
+        SAVE_DIR = MODEL_DIR / datetime.now().strftime("%Y-%m-%d_%H-%M")
+
     print(f"Model: {args.model} (input size: {input_size}x{input_size})")
+    print(f"Run dir: {SAVE_DIR}")
 
     # --- Create datasets with transforms ---
     print("Loading datasets...")
@@ -560,13 +627,8 @@ if __name__ == "__main__":
     #   Train everything at once — no freezing needed
     #
 
-    # Resolve --resume checkpoint path (shared by both models)
-    resume_path = None
-    if args.resume:
-        resume_path = SAVE_DIR / "checkpoint.pth"
-        if not resume_path.exists():
-            print("Warning: --resume specified but no checkpoint.pth found. Starting fresh.")
-            resume_path = None
+    # Resolve --resume checkpoint path
+    resume_path = (SAVE_DIR / "checkpoint.pth") if args.resume else None
 
     if args.model == "mobilenetv2":
         # --- Phase 1: Train classifier head only (backbone frozen) ---

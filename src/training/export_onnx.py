@@ -74,17 +74,22 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Export trained model to ONNX")
     parser.add_argument(
-        "--model", type=str, default="mobilenetv2",
+        "--model", type=str, default="efficientnet_b2",
         choices=["mobilenetv2", "efficientnet_b2"],
-        help="model architecture (default: mobilenetv2)",
+        help="model architecture (default: efficientnet_b2)",
     )
     args = parser.parse_args()
 
     model_config = get_model_config(args.model)
     num_classes = 555  # NABirds
 
-    # Load your trained model
-    checkpoint_path = Path("models/checkpoints") / args.model / "best_model.pth"
+    # Find the latest run's best model
+    model_dir = Path("models/checkpoints") / args.model
+    best_models = sorted(model_dir.glob("*/best_model.pth"))
+    if not best_models:
+        raise FileNotFoundError(f"No best_model.pth found in {model_dir}/*/")
+    checkpoint_path = best_models[-1]
+    print(f"Loading model from: {checkpoint_path}")
 
     model = create_model(
         num_classes=num_classes, pretrained=False,

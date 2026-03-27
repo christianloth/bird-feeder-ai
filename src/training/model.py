@@ -121,7 +121,7 @@ def create_model(
     num_classes: int,
     pretrained: bool = True,
     freeze_backbone: bool = True,
-    model_name: str = "mobilenetv2",
+    model_name: str = "efficientnet_b2",
 ) -> nn.Module:
     """
     Create a model adapted for bird species classification.
