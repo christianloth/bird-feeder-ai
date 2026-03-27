@@ -31,6 +31,9 @@ models/hef/
 .DS_Store
 Thumbs.db
 
+# Claude local files (contains camera credentials)
+.claude/
+
 # Saved images
 detections/
 
