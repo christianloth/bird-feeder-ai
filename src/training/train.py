@@ -194,9 +194,36 @@ def _print_epoch_metrics(
             total += 1
     top5_acc = top5_correct / total if total > 0 else 0.0
 
+    # Per-class precision, recall, F1 for finding worst classes
+    from sklearn.metrics import precision_recall_fscore_support
+    per_precision, per_recall, per_f1, per_support = precision_recall_fscore_support(
+        labels, preds, average=None, zero_division=0,
+    )
+
+    # Overall correct/wrong summary
+    total_samples = len(labels)
+    total_correct = int((preds == labels).sum())
+    total_wrong = total_samples - total_correct
+
     print("  --- Validation Metrics ---")
+    print(f"  Total: {total_samples} | Correct: {total_correct} | Wrong: {total_wrong}")
     print(f"  Precision: {precision:.4f}  Recall: {recall:.4f}  F1: {f1:.4f}")
     print(f"  Top-5 Accuracy: {top5_acc:.4f}")
+
+    # Worst 5 classes by F1 (only classes with support > 0)
+    classes_with_samples = np.where(per_support > 0)[0]
+    worst_indices = classes_with_samples[np.argsort(per_f1[classes_with_samples])[:5]]
+
+    print("  Worst 5 classes (by F1)  [TP=correct, FP=wrongly called this, FN=missed]:")
+    for idx in worst_indices:
+        name = class_names[idx] if class_names else str(idx)
+        tp = int(per_precision[idx] * per_support[idx]) if per_precision[idx] > 0 else 0
+        fn = int(per_support[idx] - tp)
+        # FP: times this class was predicted but was wrong
+        fp = int(((preds == idx) & (labels != idx)).sum())
+        print(f"    {name}: TP={tp} FP={fp} FN={fn} "
+              f"P={per_precision[idx]:.2f} R={per_recall[idx]:.2f} F1={per_f1[idx]:.2f} "
+              f"(n={int(per_support[idx])})")
 
     # Top-N most confused species pairs
     cm = confusion_matrix(labels, preds)
@@ -248,14 +275,25 @@ def train(
     device: torch.device | None = None,
     class_names: list[str] | None = None,
     use_amp: bool = False,
+    resume_from: str | Path | None = None,
+    scheduler_type: str = "step_lr",
+    patience: int | None = None,
 ) -> dict:
     """
     Full training pipeline.
 
+    Args:
+        scheduler_type: "step_lr" (reduce every 7 epochs — good for MobileNetV2 phases)
+                        or "reduce_on_plateau" (reduce when val acc stalls — good for
+                        end-to-end training like EfficientNet-B2)
+        patience: Early stopping patience. If val accuracy doesn't improve for this many
+                  epochs, stop training. None = no early stopping.
+
     Steps:
     1. Set up device, loss function, optimizer, and LR scheduler
-    2. Run training loop: train one epoch → validate → save best model
-    3. Return training history for plotting
+    2. Optionally resume from a checkpoint
+    3. Run training loop: train one epoch → validate → save best model
+    4. Return training history for plotting
     """
     # 1. Device setup (cuda > mps > cpu)
     if device is None:
@@ -277,8 +315,17 @@ def train(
         filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate
     )
 
-    # 5. Scheduler — reduce LR by 10x every 7 epochs for better convergence
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    # 5. Scheduler — controls how the learning rate changes during training
+    #    StepLR: predictable decay every N epochs (good for short, phased training)
+    #    ReduceLROnPlateau: adaptive — only drops LR when model stops improving
+    if scheduler_type == "step_lr":
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    elif scheduler_type == "reduce_on_plateau":
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="max", factor=0.1, patience=3,
+        )
+    else:
+        raise ValueError(f"Unknown scheduler_type: {scheduler_type}")
 
     # 6. Mixed precision scaler (only works on CUDA — ignored on MPS/CPU)
     use_amp = use_amp and device.type == "cuda"
@@ -290,16 +337,42 @@ def train(
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 8. Training loop
+    # 8. Resume from checkpoint if provided
+    start_epoch = 0
     best_val_acc = 0.0
     history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
 
-    for epoch in range(num_epochs):
+    if resume_from is not None:
+        checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        # Only restore scheduler state if the type matches. A StepLR state dict
+        # will silently load into ReduceLROnPlateau but produce wrong behavior.
+        saved_scheduler = checkpoint.get("scheduler_type", "step_lr")
+        if saved_scheduler == scheduler_type:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        else:
+            print(f"  Scheduler changed ({saved_scheduler} → {scheduler_type}) — using fresh scheduler")
+        start_epoch = checkpoint["epoch"]
+        best_val_acc = checkpoint["best_val_acc"]
+        history = checkpoint["history"]
+        print(f"Resumed from epoch {start_epoch} (best_val_acc={best_val_acc:.4f})")
+
+    # 9. Early stopping setup
+    epochs_without_improvement = 0
+
+    # 10. Training loop
+    for epoch in range(start_epoch, num_epochs):
         train_metrics = train_one_epoch(
             model, train_loader, criterion, optimizer, device, scaler=scaler,
         )
         val_metrics = validate(model, val_loader, criterion, device, use_amp=use_amp)
-        scheduler.step()
+
+        # Step the scheduler (ReduceLROnPlateau needs the metric, StepLR does not)
+        if scheduler_type == "reduce_on_plateau":
+            scheduler.step(val_metrics["accuracy"])
+        else:
+            scheduler.step()
 
         # Print progress
         current_lr = optimizer.param_groups[0]["lr"]
@@ -318,8 +391,11 @@ def train(
         # Save best model (by validation accuracy)
         if val_metrics["accuracy"] > best_val_acc:
             best_val_acc = val_metrics["accuracy"]
+            epochs_without_improvement = 0
             torch.save(model.state_dict(), save_dir / "best_model.pth")
             print(f"  Saved best model (val_acc={best_val_acc:.4f})")
+        else:
+            epochs_without_improvement += 1
 
         # Append to history
         history["train_loss"].append(train_metrics["loss"])
@@ -327,14 +403,22 @@ def train(
         history["val_loss"].append(val_metrics["loss"])
         history["val_acc"].append(val_metrics["accuracy"])
 
-    # Save final checkpoint with full state (allows resuming training)
-    torch.save({
-        "epoch": num_epochs,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "best_val_acc": best_val_acc,
-        "history": history,
-    }, save_dir / "checkpoint.pth")
+        # Save checkpoint after EVERY epoch (allows resuming if training crashes)
+        torch.save({
+            "epoch": epoch + 1,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scheduler_type": scheduler_type,
+            "best_val_acc": best_val_acc,
+            "history": history,
+        }, save_dir / "checkpoint.pth")
+
+        # Early stopping check
+        if patience is not None and epochs_without_improvement >= patience:
+            print(f"\n  Early stopping: no improvement for {patience} epochs. "
+                  f"Best val_acc={best_val_acc:.4f}")
+            break
 
     return history
 
@@ -389,10 +473,17 @@ if __name__ == "__main__":
 
     from src.training.dataset import NABirdsDataset, PreprocessedNABirdsDataset
     from src.training.transforms import get_train_transforms, get_val_transforms
-    from src.training.model import create_model, unfreeze_backbone, count_parameters
+    from src.training.model import (
+        create_model, unfreeze_backbone, count_parameters, get_model_config,
+    )
     from src.training.evaluate import plot_training_history
 
-    parser = argparse.ArgumentParser(description="Train MobileNetV2 bird classifier")
+    parser = argparse.ArgumentParser(description="Train bird species classifier")
+    parser.add_argument(
+        "--model", type=str, default="mobilenetv2",
+        choices=["mobilenetv2", "efficientnet_b2"],
+        help="model architecture (default: mobilenetv2)",
+    )
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
     parser.add_argument("--num-workers", type=int, default=4, help="data loading workers (default: 4)")
     parser.add_argument(
@@ -400,12 +491,26 @@ if __name__ == "__main__":
         help="path to preprocessed dataset (from scripts/preprocess_dataset.py)",
     )
     parser.add_argument("--amp", action="store_true", help="enable mixed precision (FP16)")
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="resume training from checkpoint.pth (keeps optimizer/scheduler state)",
+    )
     args = parser.parse_args()
 
+    # Preprocessed data is baked at 224x224 — only works with MobileNetV2
+    if args.preprocessed and args.model != "mobilenetv2":
+        parser.error("--preprocessed only works with mobilenetv2 (images were preprocessed at 224x224)")
+
+    # Look up model-specific config (input size, etc.)
+    model_config = get_model_config(args.model)
+    input_size = model_config["input_size"]
+
     DATA_DIR = Path("data/nabirds")
-    SAVE_DIR = Path("models/checkpoints")
+    SAVE_DIR = Path("models/checkpoints") / args.model  # separate dirs per model
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers
+
+    print(f"Model: {args.model} (input size: {input_size}x{input_size})")
 
     # --- Create datasets with transforms ---
     print("Loading datasets...")
@@ -414,8 +519,12 @@ if __name__ == "__main__":
         train_dataset = PreprocessedNABirdsDataset(args.preprocessed, split="train")
         val_dataset = PreprocessedNABirdsDataset(args.preprocessed, split="test")
     else:
-        train_dataset = NABirdsDataset(DATA_DIR, split="train", transform=get_train_transforms())
-        val_dataset = NABirdsDataset(DATA_DIR, split="test", transform=get_val_transforms())
+        train_dataset = NABirdsDataset(
+            DATA_DIR, split="train", transform=get_train_transforms(input_size),
+        )
+        val_dataset = NABirdsDataset(
+            DATA_DIR, split="test", transform=get_val_transforms(input_size),
+        )
     print(f"  Train: {len(train_dataset)} images")
     print(f"  Val:   {len(val_dataset)} images")
     print(f"  Classes: {train_dataset.num_classes}")
@@ -433,41 +542,100 @@ if __name__ == "__main__":
     train_loader = DataLoader(
         train_dataset, batch_size=BATCH_SIZE, shuffle=True,
         num_workers=NUM_WORKERS, pin_memory=use_pin_memory,
+        persistent_workers=NUM_WORKERS > 0,  # reuse workers across epochs (avoids FD leaks)
     )
     val_loader = DataLoader(
         val_dataset, batch_size=BATCH_SIZE, shuffle=False,
         num_workers=NUM_WORKERS, pin_memory=use_pin_memory,
+        persistent_workers=NUM_WORKERS > 0,
     )
 
-    # --- Phase 1: Train classifier head only (backbone frozen) ---
-    print("\n=== Phase 1: Training classifier head (backbone frozen) ===")
-    model = create_model(num_classes=train_dataset.num_classes, pretrained=True, freeze_backbone=True)
-    params = count_parameters(model)
-    print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+    # --- Training strategy depends on model architecture ---
+    #
+    # MobileNetV2: Two-phase (small model, needs careful training)
+    #   Phase 1: Freeze backbone, train only classifier head
+    #   Phase 2: Unfreeze late layers (14+), fine-tune with lower LR
+    #
+    # EfficientNet-B2: Single-phase (larger model, robust to end-to-end training)
+    #   Train everything at once — no freezing needed
+    #
 
-    history_phase1 = train(
-        model, train_loader, val_loader,
-        num_epochs=10, learning_rate=0.001, save_dir=SAVE_DIR,
-        class_names=class_names, use_amp=args.amp,
-    )
+    # Resolve --resume checkpoint path (shared by both models)
+    resume_path = None
+    if args.resume:
+        resume_path = SAVE_DIR / "checkpoint.pth"
+        if not resume_path.exists():
+            print("Warning: --resume specified but no checkpoint.pth found. Starting fresh.")
+            resume_path = None
 
-    # --- Phase 2: Fine-tune with late backbone layers unfrozen ---
-    # Same as run 1 but with 25 epochs instead of 15 (it was still improving when it stopped)
-    print("\n=== Phase 2: Fine-tuning (layers 14+ unfrozen, lower LR) ===")
-    unfreeze_backbone(model, unfreeze_from=14)
-    params = count_parameters(model)
-    print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+    if args.model == "mobilenetv2":
+        # --- Phase 1: Train classifier head only (backbone frozen) ---
+        # Skip Phase 1 if resuming (checkpoint is from Phase 2)
+        if resume_path:
+            print("\n=== Resuming Phase 2 from checkpoint ===")
+            model = create_model(
+                num_classes=train_dataset.num_classes, pretrained=False,
+                freeze_backbone=False, model_name="mobilenetv2",
+            )
+            unfreeze_backbone(model, unfreeze_from=14)
+            history_phase1 = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
+        else:
+            print("\n=== Phase 1: Training classifier head (backbone frozen) ===")
+            model = create_model(
+                num_classes=train_dataset.num_classes, pretrained=True,
+                freeze_backbone=True, model_name="mobilenetv2",
+            )
+            params = count_parameters(model)
+            print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
 
-    history_phase2 = train(
-        model, train_loader, val_loader,
-        num_epochs=25, learning_rate=0.0001, save_dir=SAVE_DIR,
-        class_names=class_names, use_amp=args.amp,
-    )
+            history_phase1 = train(
+                model, train_loader, val_loader,
+                num_epochs=10, learning_rate=0.001, save_dir=SAVE_DIR,
+                class_names=class_names, use_amp=args.amp,
+            )
 
-    # --- Plot combined training history ---
-    combined_history = {
-        key: history_phase1[key] + history_phase2[key]
-        for key in history_phase1
-    }
+            # --- Phase 2: Fine-tune with late backbone layers unfrozen ---
+            print("\n=== Phase 2: Fine-tuning (layers 14+ unfrozen, lower LR) ===")
+            unfreeze_backbone(model, unfreeze_from=14)
+
+        params = count_parameters(model)
+        print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+
+        history_phase2 = train(
+            model, train_loader, val_loader,
+            num_epochs=25, learning_rate=0.0001, save_dir=SAVE_DIR,
+            class_names=class_names, use_amp=args.amp,
+            resume_from=resume_path,
+        )
+
+        # Combine both phases into one history for plotting
+        combined_history = {
+            key: history_phase1[key] + history_phase2[key]
+            for key in history_phase1
+        }
+
+    elif args.model == "efficientnet_b2":
+        # --- Single phase: train end-to-end (no freezing) ---
+        # EfficientNet-B2 is large enough to handle gradients from an untrained head.
+        # This mirrors the approach used by Dennis Joostel's Birds-Classifier-EfficientNetB2
+        # which achieved 99% accuracy on 525 species with this strategy.
+        print("\n=== Training EfficientNet-B2 end-to-end ===")
+        model = create_model(
+            num_classes=train_dataset.num_classes, pretrained=True,
+            freeze_backbone=False, model_name="efficientnet_b2",
+        )
+        params = count_parameters(model)
+        print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+
+        combined_history = train(
+            model, train_loader, val_loader,
+            num_epochs=30, learning_rate=0.001, save_dir=SAVE_DIR,
+            class_names=class_names, use_amp=args.amp,
+            resume_from=resume_path,
+            scheduler_type="reduce_on_plateau",
+            patience=5,
+        )
+
+    # --- Plot training history ---
     plot_training_history(combined_history, save_path=SAVE_DIR / "training_history.png")
     print("\nTraining complete!")

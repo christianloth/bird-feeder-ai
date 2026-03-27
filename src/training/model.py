@@ -1,5 +1,5 @@
 """
-YOUR CODE: Transfer Learning with MobileNetV2
+YOUR CODE: Transfer Learning with MobileNetV2 / EfficientNet-B2
 
 Transfer learning is the key insight that makes this project feasible:
 instead of training a model from scratch (which would need millions of images),
@@ -13,15 +13,28 @@ WHAT TO LEARN:
 - "Freezing" means setting requires_grad=False — those weights won't update during training
 - Strategy: freeze backbone first (train only the head), then unfreeze and fine-tune everything
 
-MobileNetV2 ARCHITECTURE:
+SUPPORTED MODELS:
+
+  MobileNetV2 ARCHITECTURE:
     Input (3, 224, 224)
         → features (backbone): 18 inverted residual blocks → (1280, 7, 7)
         → avgpool: (1280, 7, 7) → (1280,)
         → classifier (head): Linear(1280, 1000)  ← WE REPLACE THIS
 
-    We change: classifier = Linear(1280, num_species)
+    Small (3.4M params), designed for mobile/edge — perfect for Raspberry Pi + Hailo NPU.
+    Training strategy: TWO-PHASE (freeze backbone → unfreeze late layers with lower LR).
 
-WHAT EACH LAYER GROUP "SEES" (and how fine-tuning changes them):
+  EfficientNet-B2 ARCHITECTURE:
+    Input (3, 260, 260)
+        → features (backbone): 8 compound-scaled blocks → (1408, 9, 9)
+        → avgpool: (1408, 9, 9) → (1408,)
+        → classifier (head): Linear(1408, 1000)  ← WE REPLACE THIS
+
+    Larger (7.8M params), higher accuracy via compound scaling (depth + width + resolution).
+    Training strategy: SINGLE-PHASE (train end-to-end, no freezing needed — the larger
+    architecture is robust enough to handle gradients from the untrained head).
+
+WHAT EACH LAYER GROUP "SEES" (MobileNetV2, similar concept applies to EfficientNet-B2):
     Before fine-tuning (pretrained on ImageNet — 1000 generic classes like "bus", "pizza", "tabby cat"):
 
     Layers 0-6  (early):  Edges, corners, textures, basic color gradients
@@ -60,48 +73,101 @@ WHY MobileNetV2?
 - Google uses it for their official iNaturalist bird classifier on Coral TPU
 - Well-documented with tons of transfer learning tutorials
 
+WHY EfficientNet-B2?
+- Higher accuracy than MobileNetV2 (compound scaling: depth + width + resolution)
+- Still relatively small (7.8M params) — practical for fine-tuning on a single GPU
+- Proven on bird classification: 99% accuracy on 525 species (Dennis Joostel's project)
+- Robust to end-to-end training — no need for careful two-phase freeze/unfreeze
+
 DOCS:
 - https://pytorch.org/vision/stable/models/mobilenetv2.html
+- https://pytorch.org/vision/stable/models/efficientnet.html
 - https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 """
 
 import torch.nn as nn
 from torchvision import models
 
+# Model configurations — the single source of truth for each architecture.
+# When you add a new model, add its config here and handle it in create_model().
+MODEL_CONFIGS: dict[str, dict] = {
+    "mobilenetv2": {
+        "input_size": 224,
+        "feature_dim": 1280,
+        "dropout": 0.2,
+        "num_blocks": 18,           # model.features[0..17]
+        "default_unfreeze_from": 14,  # unfreeze layers 14-17 in Phase 2
+    },
+    "efficientnet_b2": {
+        "input_size": 260,
+        "feature_dim": 1408,
+        "dropout": 0.3,
+        "num_blocks": 8,            # model.features[0..7]
+        "default_unfreeze_from": None,  # trains end-to-end, no Phase 2
+    },
+}
 
-def create_model(num_classes: int, pretrained: bool = True, freeze_backbone: bool = True) -> nn.Module:
+
+def get_model_config(model_name: str) -> dict:
+    """Return configuration for the given model architecture."""
+    if model_name not in MODEL_CONFIGS:
+        raise ValueError(
+            f"Unknown model: {model_name}. Choose from: {list(MODEL_CONFIGS.keys())}"
+        )
+    return MODEL_CONFIGS[model_name]
+
+
+def create_model(
+    num_classes: int,
+    pretrained: bool = True,
+    freeze_backbone: bool = True,
+    model_name: str = "mobilenetv2",
+) -> nn.Module:
     """
-    Create a MobileNetV2 model adapted for bird species classification.
+    Create a model adapted for bird species classification.
 
     Args:
         num_classes: Number of bird species (555 for NABirds)
         pretrained: Load ImageNet pretrained weights
         freeze_backbone: If True, freeze the feature extraction layers
+        model_name: Which architecture — "mobilenetv2" or "efficientnet_b2"
 
     Returns:
-        Modified MobileNetV2 model
+        Modified model with new classifier head
 
     Steps:
-    1. Load pretrained MobileNetV2 (ImageNet weights if pretrained=True)
+    1. Load pretrained model (ImageNet weights if pretrained=True)
     2. Freeze the backbone so only the classifier head trains initially
-    3. Replace the classifier head: Linear(1280, 1000) → Linear(1280, num_classes)
+    3. Replace the classifier head: Linear(feature_dim, 1000) → Linear(feature_dim, num_classes)
     4. Return the model
     """
-    # 1. Load MobileNetV2 with or without ImageNet pretrained weights
-    weights = models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
-    model = models.mobilenet_v2(weights=weights)
+    config = get_model_config(model_name)
+
+    # 1. Load model with or without ImageNet pretrained weights
+    if model_name == "mobilenetv2":
+        weights = models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
+        model = models.mobilenet_v2(weights=weights)
+    elif model_name == "efficientnet_b2":
+        weights = models.EfficientNet_B2_Weights.IMAGENET1K_V1 if pretrained else None
+        model = models.efficientnet_b2(weights=weights)
 
     # 2. Freeze the backbone so only the classifier head trains in Phase 1
+    #    (For EfficientNet-B2, you'd typically pass freeze_backbone=False
+    #     and train end-to-end in a single phase)
     if freeze_backbone:
         for param in model.features.parameters():
             param.requires_grad = False
 
-    # 3. Replace the classifier head: Linear(1280, 1000) → Linear(1280, num_classes)
-    in_features = model.classifier[1].in_features  # 1280
+    # 3. Replace the classifier head: Linear(feature_dim, 1000) → Linear(feature_dim, num_classes)
+    #    Both MobileNetV2 and EfficientNet-B2 use model.classifier[1] as the Linear layer
+    in_features = model.classifier[1].in_features  # 1280 for MobileNetV2, 1408 for EfficientNet-B2
     model.classifier = nn.Sequential(
-        nn.Dropout(0.2),
+        nn.Dropout(config["dropout"]),
         nn.Linear(in_features, num_classes),
     )
+
+    # Store model name for downstream use (e.g., unfreeze_backbone checks this)
+    model._model_name = model_name
 
     return model
 
@@ -114,8 +180,11 @@ def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
     the entire model with a LOWER learning rate. This lets the backbone adapt
     its features specifically for birds.
 
+    NOTE: This is used for MobileNetV2's two-phase training strategy.
+    EfficientNet-B2 trains end-to-end in a single phase (no freezing/unfreezing).
+
     Args:
-        model: The MobileNetV2 model
+        model: The model (MobileNetV2)
         unfreeze_from: Unfreeze from this layer index onwards.
             MobileNetV2 has 18 feature blocks (0-17).
             Unfreezing from 14 means: layers 14-17 + classifier are trainable.
@@ -143,6 +212,12 @@ def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
     2. Unfreeze layers from unfreeze_from onwards
     3. Unfreeze the classifier head
     """
+    # EfficientNet-B2 trains end-to-end — no phase 2 needed
+    model_name = getattr(model, "_model_name", "mobilenetv2")
+    if model_name == "efficientnet_b2":
+        print("  EfficientNet-B2 trains end-to-end — skipping unfreeze (not needed)")
+        return
+
     # Step 1: Freeze everything first (clean slate)
     for param in model.parameters():
         param.requires_grad = False

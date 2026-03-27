@@ -69,17 +69,32 @@ def export_to_onnx(
 
 
 if __name__ == "__main__":
-    from src.training.model import create_model
+    import argparse
+    from src.training.model import create_model, get_model_config
 
-    # Load your trained model
-    checkpoint_path = Path("models/checkpoints/best_model.pth")
+    parser = argparse.ArgumentParser(description="Export trained model to ONNX")
+    parser.add_argument(
+        "--model", type=str, default="mobilenetv2",
+        choices=["mobilenetv2", "efficientnet_b2"],
+        help="model architecture (default: mobilenetv2)",
+    )
+    args = parser.parse_args()
+
+    model_config = get_model_config(args.model)
     num_classes = 555  # NABirds
 
-    model = create_model(num_classes=num_classes, pretrained=False, freeze_backbone=False)
+    # Load your trained model
+    checkpoint_path = Path("models/checkpoints") / args.model / "best_model.pth"
+
+    model = create_model(
+        num_classes=num_classes, pretrained=False,
+        freeze_backbone=False, model_name=args.model,
+    )
     model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"))
 
     export_to_onnx(
         model=model,
-        output_path="models/onnx/mobilenetv2_birds.onnx",
+        output_path=f"models/onnx/{args.model}_birds.onnx",
         num_classes=num_classes,
+        input_size=model_config["input_size"],
     )

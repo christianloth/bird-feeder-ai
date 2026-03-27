@@ -13,8 +13,12 @@ WHAT TO LEARN:
   consistent evaluation)
 - All pipelines must end with ToTensor() and Normalize()
 
-MobileNetV2 REQUIREMENTS:
-- Input size: 224x224 pixels
+MODEL INPUT SIZES:
+- MobileNetV2: 224x224 pixels
+- EfficientNet-B2: 260x260 pixels
+- The input_size parameter controls this — defaults to 224 (MobileNetV2)
+
+NORMALIZATION (same for both models — both pretrained on ImageNet):
 - Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
   (Because we're using a backbone pretrained on ImageNet, our data must be
   normalized the same way ImageNet was during that pretraining)
@@ -26,7 +30,7 @@ MobileNetV2 REQUIREMENTS:
   pretrained backbone expects to see.
 
 AUGMENTATIONS TO CONSIDER FOR BIRDS:
-- RandomResizedCrop(224): Randomly crop and resize — simulates different distances
+- RandomResizedCrop(input_size): Randomly crop and resize — simulates different distances
 - RandomHorizontalFlip(): Birds can face left or right
 - RandomRotation(15): Slight tilt — birds don't always perch perfectly level
 - ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2): Lighting varies
@@ -46,18 +50,21 @@ DOCS: https://pytorch.org/vision/stable/transforms.html
 from torchvision import transforms
 
 
-# ImageNet normalization values (used because MobileNetV2 was pretrained on ImageNet)
+# ImageNet normalization values (used because both models were pretrained on ImageNet)
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
-INPUT_SIZE = 224
+DEFAULT_INPUT_SIZE = 224  # MobileNetV2=224, EfficientNet-B2=260
 
 
-def get_train_transforms() -> transforms.Compose:
+def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compose:
     """
     Training transforms with data augmentation.
 
+    Args:
+        input_size: Model input resolution (224 for MobileNetV2, 260 for EfficientNet-B2)
+
     Pipeline:
-    1. RandomResizedCrop(INPUT_SIZE) — crop random region and resize to 224x224
+    1. RandomResizedCrop(input_size) — crop random region and resize to input_size x input_size
     2. RandomHorizontalFlip() — 50% chance to mirror horizontally
     3. RandomRotation(15) — rotate up to 15 degrees
     4. ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)
@@ -65,7 +72,7 @@ def get_train_transforms() -> transforms.Compose:
     6. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
     """
     return transforms.Compose([
-        transforms.RandomResizedCrop(INPUT_SIZE),
+        transforms.RandomResizedCrop(input_size),
         transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(15),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
@@ -74,31 +81,37 @@ def get_train_transforms() -> transforms.Compose:
     ])
 
 
-def get_val_transforms() -> transforms.Compose:
+def get_val_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compose:
     """
     Validation/test transforms — NO randomness.
 
+    Args:
+        input_size: Model input resolution (224 for MobileNetV2, 260 for EfficientNet-B2)
+
     Pipeline:
-    1. Resize(256) — resize shortest edge to 256
-    2. CenterCrop(INPUT_SIZE) — deterministic center crop to 224x224
+    1. Resize(input_size + 32) — resize shortest edge (standard ImageNet eval protocol)
+    2. CenterCrop(input_size) — deterministic center crop
     3. transforms.ToTensor()
     4. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
 
     WHY different from training?
     - No randomness ensures evaluation is reproducible
-    - Resize(256) then CenterCrop(224) is the standard ImageNet eval protocol
+    - Resize then CenterCrop is the standard ImageNet eval protocol
     """
     return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(INPUT_SIZE),
+        transforms.Resize(input_size + 32),
+        transforms.CenterCrop(input_size),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ])
 
 
-def get_inference_transforms() -> transforms.Compose:
+def get_inference_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compose:
     """
     Inference transforms for production use (same as validation).
     Used when classifying birds from camera crops.
+
+    Args:
+        input_size: Model input resolution (224 for MobileNetV2, 260 for EfficientNet-B2)
     """
-    return get_val_transforms()
+    return get_val_transforms(input_size)

@@ -1,7 +1,7 @@
 """
 Bird species classifier supporting multiple backends.
 
-Runs MobileNetV2 (fine-tuned on NABirds) on cropped bird images. Supports:
+Runs a fine-tuned model (MobileNetV2 or EfficientNet-B2) on cropped bird images. Supports:
 - PyTorch (MPS/CUDA/CPU) — for Mac development and GPU servers
 - ONNX Runtime — cross-platform, optimized inference
 - Hailo NPU — Raspberry Pi AI HAT+ production deployment
@@ -37,7 +37,8 @@ class BirdClassifier:
         hef_model=None,
         class_names: dict[int, str] | None = None,
         device: torch.device | None = None,
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float = 0.10,
+        input_size: int = 224,
     ):
         self.backend = backend
         self._model = model
@@ -46,7 +47,7 @@ class BirdClassifier:
         self.class_names = class_names or {}
         self.device = device
         self.confidence_threshold = confidence_threshold
-        self._transform = get_inference_transforms()
+        self._transform = get_inference_transforms(input_size)
 
     @classmethod
     def from_pytorch(
@@ -55,10 +56,13 @@ class BirdClassifier:
         class_names: dict[int, str] | None = None,
         num_classes: int = 555,
         device: str | None = None,
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float = 0.10,
+        model_name: str = "mobilenetv2",
     ) -> "BirdClassifier":
         """Load a PyTorch checkpoint. Auto-selects MPS/CUDA/CPU."""
-        from src.training.model import create_model
+        from src.training.model import create_model, get_model_config
+
+        model_config = get_model_config(model_name)
 
         if device is None:
             if torch.cuda.is_available():
@@ -70,18 +74,22 @@ class BirdClassifier:
         else:
             dev = torch.device(device)
 
-        model = create_model(num_classes=num_classes, pretrained=False, freeze_backbone=False)
+        model = create_model(
+            num_classes=num_classes, pretrained=False,
+            freeze_backbone=False, model_name=model_name,
+        )
         model.load_state_dict(torch.load(checkpoint_path, map_location=dev, weights_only=True))
         model = model.to(dev)
         model.eval()
 
-        logger.info(f"Loaded PyTorch classifier on {dev} from {checkpoint_path}")
+        logger.info(f"Loaded {model_name} classifier on {dev} from {checkpoint_path}")
         return cls(
             backend="pytorch",
             model=model,
             class_names=class_names,
             device=dev,
             confidence_threshold=confidence_threshold,
+            input_size=model_config["input_size"],
         )
 
     @classmethod
@@ -89,7 +97,7 @@ class BirdClassifier:
         cls,
         onnx_path: str | Path,
         class_names: dict[int, str] | None = None,
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float = 0.10,
     ) -> "BirdClassifier":
         """Load an ONNX model for cross-platform inference."""
         import onnxruntime as ort
@@ -110,7 +118,7 @@ class BirdClassifier:
         cls,
         hef_path: str | Path,
         class_names: dict[int, str] | None = None,
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float = 0.10,
     ) -> "BirdClassifier":
         """Load a Hailo HEF model for NPU inference on Raspberry Pi."""
         from hailo_platform import HEF, VDevice, ConfigureParams
@@ -197,9 +205,6 @@ class BirdClassifier:
             class_idx, confidence = self._predict_hailo(tensor)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
-
-        if confidence < self.confidence_threshold:
-            return None, confidence
 
         species_name = self.class_names.get(class_idx, f"class_{class_idx}")
         return species_name, confidence

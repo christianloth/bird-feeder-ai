@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Classification (MobileNetV2 fine-tuned)
     classifier_model_path: Path = models_dir / "hef" / "mobilenetv2_birds.hef"
-    classification_confidence_threshold: float = 0.5
+    classification_confidence_threshold: float = 0.10
     num_species: int = 555  # NABirds dataset
 
     # Training
