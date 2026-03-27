@@ -36,3 +36,4 @@ detections/
 
 # Environment
 .env
+/data/
