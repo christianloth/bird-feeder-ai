@@ -53,6 +53,10 @@ class DetectionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DetectionReview(BaseModel):
+    is_false_positive: bool = False
+
+
 class DetectionStats(BaseModel):
     total_detections: int
     unique_species: int

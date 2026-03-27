@@ -24,6 +24,7 @@ from src.backend.database import (
 )
 from src.backend.schemas import (
     DetectionResponse,
+    DetectionReview,
     DetectionStats,
     SpeciesResponse,
     WeatherResponse,
@@ -139,7 +140,7 @@ def get_detection(detection_id: int, session: SessionDep):
 @app.patch("/api/detections/{detection_id}/review")
 def review_detection(
     detection_id: int,
-    is_false_positive: bool,
+    body: DetectionReview,
     session: SessionDep,
 ):
     """Mark a detection as reviewed (correct or false positive)."""
@@ -147,9 +148,9 @@ def review_detection(
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
     detection.reviewed = True
-    detection.is_false_positive = is_false_positive
+    detection.is_false_positive = body.is_false_positive
     session.commit()
-    return {"ok": True, "detection_id": detection_id, "is_false_positive": is_false_positive}
+    return {"ok": True, "detection_id": detection_id, "is_false_positive": body.is_false_positive}
 
 
 # --- Stats ---
