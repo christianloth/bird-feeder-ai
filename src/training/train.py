@@ -357,7 +357,7 @@ def train(
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
     elif scheduler_type == "reduce_on_plateau":
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="max", factor=0.1, patience=3,
+            optimizer, mode="max", factor=0.1, patience=1, min_lr=1e-6,
         )
     else:
         raise ValueError(f"Unknown scheduler_type: {scheduler_type}")
