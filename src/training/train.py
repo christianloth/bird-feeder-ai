@@ -38,6 +38,7 @@ DEVICE:
 - .to(device) moves tensors to the right hardware
 """
 
+import signal
 from pathlib import Path
 
 import torch
@@ -45,6 +46,28 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+# Module-level flag: set by SIGTERM handler to request graceful shutdown after current epoch
+_graceful_shutdown = False
+
+
+def _worker_init_sigterm_ignore(worker_id: int) -> None:
+    """Make DataLoader workers ignore SIGTERM so the main process controls shutdown."""
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
+def install_sigterm_handler() -> None:
+    """Install a SIGTERM handler that requests graceful shutdown instead of crashing.
+
+    Call this before training starts. When SIGTERM arrives (e.g., IDE quitting),
+    the current epoch finishes, checkpoint is saved, then training exits cleanly.
+    """
+    def _handler(signum, frame):
+        global _graceful_shutdown
+        _graceful_shutdown = True
+        print("\nSIGTERM received — will save checkpoint after current epoch...")
+
+    signal.signal(signal.SIGTERM, _handler)
 
 
 def train_one_epoch(
@@ -461,6 +484,12 @@ def train(
                       f"Best val_acc={best_val_acc:.4f}")
                 break
 
+            # Graceful shutdown check (SIGTERM received — checkpoint already saved above)
+            if _graceful_shutdown:
+                print(f"\n  Graceful shutdown after epoch {epoch + 1}. "
+                      f"Resume with --resume to continue.")
+                break
+
     except KeyboardInterrupt:
         print(f"\n\nTraining interrupted at epoch {epoch + 1}.")
 
@@ -610,12 +639,17 @@ if __name__ == "__main__":
         train_dataset, batch_size=BATCH_SIZE, shuffle=True,
         num_workers=NUM_WORKERS, pin_memory=use_pin_memory,
         persistent_workers=NUM_WORKERS > 0,  # reuse workers across epochs (avoids FD leaks)
+        worker_init_fn=_worker_init_sigterm_ignore,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=BATCH_SIZE, shuffle=False,
         num_workers=NUM_WORKERS, pin_memory=use_pin_memory,
         persistent_workers=NUM_WORKERS > 0,
+        worker_init_fn=_worker_init_sigterm_ignore,
     )
+
+    # Install SIGTERM handler so IDE/terminal exits don't crash training
+    install_sigterm_handler()
 
     # --- Training strategy depends on model architecture ---
     #

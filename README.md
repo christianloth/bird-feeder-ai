@@ -1,8 +1,8 @@
 # Bird Feeder AI
 
-24/7 bird species detection and tracking system using a Raspberry Pi 5, Hailo AI HAT+ NPU, and an SV3C 4K PTZ camera pointed at a bird feeder in Frisco, TX.
+24/7 bird species detection and tracking system using a Raspberry Pi 5, Hailo AI HAT+ 2 (Hailo-10H NPU), and an SV3C 4K PTZ camera pointed at a bird feeder in Frisco, TX.
 
-The system identifies birds in real time using a two-stage AI pipeline: YOLOv8n detects birds in the camera feed, then a fine-tuned classifier (EfficientNet-B2 or MobileNetV2) identifies each bird to one of 555 species from the NABirds dataset. All inference runs on-device via the Hailo NPU at 26 TOPS, with no cloud dependency. A FastAPI backend with SQLite stores every detection for review and analysis.
+The system identifies birds in real time using a two-stage AI pipeline: YOLOv8n detects birds in the camera feed, then a fine-tuned classifier (EfficientNet-B2 or MobileNetV2) identifies each bird to one of 555 species from the NABirds dataset. All inference runs on-device via the Hailo-10H NPU (40 TOPS INT4 / 20 TOPS INT8), with no cloud dependency. A FastAPI backend with SQLite stores every detection for review and analysis.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ Camera (RTSP) --> YOLOv8n (detection) --> Tracker --> EfficientNet-B2 (classific
 | Component | Model |
 |---|---|
 | Compute | Raspberry Pi 5 (8 GB) |
-| AI Accelerator | Hailo AI HAT+ (26 TOPS NPU) |
+| AI Accelerator | Hailo AI HAT+ 2 (Hailo-10H, 40 TOPS INT4 / 20 TOPS INT8) |
 | Camera | SV3C 4K PTZ (RTSP stream) |
 | Location | Frisco, TX (33.15N, -96.82W) |
 

@@ -195,7 +195,7 @@ if __name__ == "__main__":
         help="Directory containing calibration images",
     )
     parser.add_argument(
-        "--hw-arch", type=str, default="hailo8",
+        "--hw-arch", type=str, default="hailo10h",
         choices=["hailo8", "hailo8l", "hailo10h", "hailo15h"],
         help="Target Hailo hardware architecture",
     )
