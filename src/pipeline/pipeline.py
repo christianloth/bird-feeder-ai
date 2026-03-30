@@ -251,7 +251,7 @@ class BirdPipeline:
 
 
 def create_pipeline_dev(
-    checkpoint_path: str | Path = "models/checkpoints/efficientnet_b2/best_model.pth",
+    checkpoint_path: str | Path = "models/bird-classifier/efficientnet_b2/best_model.pth",
     class_names: dict[int, str] | None = None,
     rtsp_url: str | None = None,
     device: str | None = None,
@@ -336,7 +336,7 @@ if __name__ == "__main__":
         help="Run on a single image instead of live camera",
     )
     parser.add_argument(
-        "--checkpoint", type=str, default="models/checkpoints/efficientnet_b2/best_model.pth",
+        "--checkpoint", type=str, default="models/bird-classifier/efficientnet_b2/best_model.pth",
         help="Path to trained model checkpoint (dev mode)",
     )
     parser.add_argument(

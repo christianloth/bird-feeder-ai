@@ -329,7 +329,7 @@ def train(
     val_loader: DataLoader,
     num_epochs: int = 25,
     learning_rate: float = 0.001,
-    save_dir: str | Path = "models/checkpoints",
+    save_dir: str | Path = "models/bird-classifier",
     device: torch.device | None = None,
     class_names: list[str] | None = None,
     use_amp: bool = False,
@@ -586,7 +586,7 @@ if __name__ == "__main__":
     from datetime import datetime
 
     DATA_DIR = Path("data/nabirds")
-    MODEL_DIR = Path("models/checkpoints") / args.model
+    MODEL_DIR = Path("models/bird-classifier") / args.model
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers
 

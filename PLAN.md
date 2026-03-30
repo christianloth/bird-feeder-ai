@@ -145,7 +145,7 @@ bird-feeder-ai/
 ├── data/
 │   └── nabirds/                     # NABirds dataset (gitignored)
 ├── models/
-│   ├── checkpoints/                 # PyTorch training checkpoints (gitignored)
+│   ├── bird-classifier/             # Species classifier checkpoints (gitignored)
 │   ├── onnx/                        # Exported ONNX models (gitignored)
 │   └── hef/                         # Compiled Hailo HEF files (gitignored)
 ├── notebooks/

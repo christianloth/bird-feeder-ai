@@ -84,7 +84,7 @@ if __name__ == "__main__":
     num_classes = 555  # NABirds
 
     # Find the latest run's best model
-    model_dir = Path("models/checkpoints") / args.model
+    model_dir = Path("models/bird-classifier") / args.model
     best_models = sorted(model_dir.glob("*/best_model.pth"))
     if not best_models:
         raise FileNotFoundError(f"No best_model.pth found in {model_dir}/*/")

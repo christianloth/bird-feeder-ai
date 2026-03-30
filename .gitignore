@@ -11,7 +11,7 @@ venv/
 
 # ML artifacts
 data/nabirds/
-models/checkpoints/
+models/bird-classifier/
 models
 *.pt
 *.pth

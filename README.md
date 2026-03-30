@@ -115,7 +115,7 @@ python -m src.training.train --model mobilenetv2
 Each run creates a timestamped folder:
 
 ```
-models/checkpoints/efficientnet_b2/
+models/bird-classifier/efficientnet_b2/
   2026-03-27_04-12/
     best_model.pth          # Best weights from this run (by val accuracy)
     checkpoint.pth          # Full state for --resume (model + optimizer + scheduler)
@@ -171,7 +171,7 @@ python -m src.pipeline.pipeline [OPTIONS]
 |---|---|---|
 | `--mode {dev,hailo}` | `dev` | Deployment mode: `dev` for Mac/PC, `hailo` for Raspberry Pi |
 | `--image PATH` | None | Process a single image instead of live camera |
-| `--checkpoint PATH` | `models/checkpoints/efficientnet_b2/best_model.pth` | Path to trained model checkpoint (dev mode) |
+| `--checkpoint PATH` | `models/bird-classifier/efficientnet_b2/best_model.pth` | Path to trained model checkpoint (dev mode) |
 | `--rtsp-url URL` | From config | RTSP camera URL (overrides `config/settings.py`) |
 | `--device {mps,cuda,cpu}` | Auto-detected | Force compute device (dev mode only) |
 

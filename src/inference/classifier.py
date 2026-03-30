@@ -25,7 +25,7 @@ class BirdClassifier:
     Species classifier with pluggable backends.
 
     Usage:
-        classifier = BirdClassifier.from_pytorch("models/checkpoints/mobilenetv2/2026-03-26_12-43/best_model.pth")
+        classifier = BirdClassifier.from_pytorch("models/bird-classifier/mobilenetv2/2026-03-26_12-43/best_model.pth")
         species, confidence = classifier.predict(bird_crop_bgr)
     """
 
