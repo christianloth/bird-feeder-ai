@@ -1,15 +1,21 @@
 """Train YOLOv8n for wildlife detection.
 
-Trains a YOLOv8n model on the merged Caltech + WCS camera trap dataset
-(13 wildlife classes). All paths are absolute so this can be run from
-any working directory.
+Trains a YOLOv8n model on the merged Caltech + WCS camera trap dataset.
+All paths are absolute so this can be run from any working directory.
+
+Balancing modes:
+    --balanced   Inverse-frequency weighting: rare classes sampled more often,
+                 but not perfectly equal. Good general-purpose option.
+    --equal      True equalization: every class is sampled equally per epoch.
+                 Best for single-class-per-image datasets (like trail cameras).
 
 Usage:
     python scripts/train_wildlife_yolo.py
     python scripts/train_wildlife_yolo.py --resume
     python scripts/train_wildlife_yolo.py --epochs 50 --batch 8
     python scripts/train_wildlife_yolo.py --balanced
-    python scripts/train_wildlife_yolo.py --balanced --min-samples 50
+    python scripts/train_wildlife_yolo.py --equal
+    python scripts/train_wildlife_yolo.py --equal --min-samples 50
 """
 
 from __future__ import annotations
@@ -84,6 +90,66 @@ class YOLOWeightedDataset(YOLODataset):
         return self.transforms(self.get_image_and_label(index))
 
 
+class YOLOEqualDataset(YOLODataset):
+    """YOLODataset with equal class sampling at a fixed count per class.
+
+    Each class gets exactly `samples_per_class` samples per epoch.
+    A class is chosen uniformly at random, then an image from that class
+    is chosen uniformly at random. Classes with fewer images than the
+    target will have images repeated (with different augmentations).
+
+    Set the class variable `samples_per_class` before training starts.
+
+    Best suited for datasets where each image contains a single class
+    (e.g., trail camera images with one animal per trigger).
+    """
+
+    samples_per_class: int = 1000  # set from --equal N before training
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.train_mode = "train" in self.prefix
+        self._build_class_index()
+
+    def _build_class_index(self) -> None:
+        """Build a mapping from class_id -> list of image indices."""
+        num_classes = len(self.data["names"])
+        self._class_to_indices: dict[int, list[int]] = {c: [] for c in range(num_classes)}
+
+        for img_idx, label in enumerate(self.labels):
+            cls = label["cls"].reshape(-1).astype(int)
+            for class_id in cls:
+                self._class_to_indices[class_id].append(img_idx)
+
+        # Remove empty classes (no images)
+        self._active_classes = [c for c in self._class_to_indices if self._class_to_indices[c]]
+        n = self.samples_per_class
+
+        print(f"Equal sampling: {n} samples/class, "
+              f"{len(self._active_classes)} classes, "
+              f"{n * len(self._active_classes)} total samples/epoch:")
+        names = self.data["names"]
+        for c in self._active_classes:
+            actual = len(self._class_to_indices[c])
+            repeat = f"({n / actual:.1f}x oversample)" if actual < n else ""
+            print(f"  {c:2d} {names[c]:15s} {actual:6d} images  {repeat}")
+
+    def __len__(self) -> int:
+        """Epoch size = num_classes * samples_per_class."""
+        if not self.train_mode:
+            return super().__len__()
+        return len(self._active_classes) * self.samples_per_class
+
+    def __getitem__(self, index):
+        """Pick a random class, then a random image from that class."""
+        if not self.train_mode:
+            return self.transforms(self.get_image_and_label(index))
+        class_id = np.random.choice(self._active_classes)
+        index = np.random.choice(self._class_to_indices[class_id])
+        return self.transforms(self.get_image_and_label(index))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train YOLOv8n wildlife detector")
     parser.add_argument("--model", default="yolov8n.pt", help="Base model (default: yolov8n.pt)")
@@ -97,7 +163,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--name", default="yolov8n-wildlife", help="Run name")
     parser.add_argument(
         "--balanced", action="store_true",
-        help="Use weighted dataloader to oversample rare classes",
+        help="Use inverse-frequency weighted dataloader to oversample rare classes",
+    )
+    parser.add_argument(
+        "--equal", type=int, metavar="N",
+        help="Equal class sampling: N samples per class per epoch (e.g., --equal 1000)",
     )
     parser.add_argument(
         "--min-samples", type=int, default=0,
@@ -148,11 +218,18 @@ def print_class_warnings(min_samples: int) -> None:
 def main() -> None:
     args = parse_args()
 
-    if args.balanced:
-        print("Balanced mode: activating weighted dataloader for class-balanced sampling")
-        build.YOLODataset = YOLOWeightedDataset
+    if args.balanced and args.equal:
+        raise ValueError("--balanced and --equal are mutually exclusive")
 
-    if args.balanced or args.min_samples > 0:
+    if args.balanced:
+        print("Balanced mode: inverse-frequency weighted sampling")
+        build.YOLODataset = YOLOWeightedDataset
+    elif args.equal:
+        print(f"Equal mode: {args.equal} samples per class per epoch")
+        YOLOEqualDataset.samples_per_class = args.equal
+        build.YOLODataset = YOLOEqualDataset
+
+    if args.balanced or args.equal or args.min_samples > 0:
         print_class_warnings(args.min_samples)
 
     if args.resume:
