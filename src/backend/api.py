@@ -134,6 +134,8 @@ def get_detection(detection_id: int, session: SessionDep):
         raise HTTPException(status_code=404, detail="Detection not found")
     resp = DetectionResponse.model_validate(detection)
     resp.species_name = detection.species.common_name if detection.species else None
+    if detection.corrected_species:
+        resp.corrected_species_name = detection.corrected_species.common_name
     return resp
 
 
@@ -143,14 +145,37 @@ def review_detection(
     body: DetectionReview,
     session: SessionDep,
 ):
-    """Mark a detection as reviewed (correct or false positive)."""
+    """
+    Mark a detection as reviewed.
+
+    Set is_false_positive=true if the detection is wrong entirely.
+    Set corrected_species_id if the species was misidentified (the detection
+    is real but the classifier got the species wrong). The corrected label
+    will be used when exporting training data.
+    """
     detection = session.get(Detection, detection_id)
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
+
+    if body.corrected_species_id is not None:
+        corrected = session.get(Species, body.corrected_species_id)
+        if not corrected:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Corrected species ID {body.corrected_species_id} not found",
+            )
+        detection.corrected_species_id = body.corrected_species_id
+
     detection.reviewed = True
     detection.is_false_positive = body.is_false_positive
     session.commit()
-    return {"ok": True, "detection_id": detection_id, "is_false_positive": body.is_false_positive}
+
+    return {
+        "ok": True,
+        "detection_id": detection_id,
+        "is_false_positive": body.is_false_positive,
+        "corrected_species_id": detection.corrected_species_id,
+    }
 
 
 # --- Stats ---

@@ -104,7 +104,7 @@ def test_image_storage_saves_and_cleans_up():
         frame[100:300, 150:350] = [0, 0, 200]
 
         # Save a detection
-        crop_path, thumb_path = storage.save_detection(
+        paths = storage.save_detection(
             frame=frame,
             bbox=(150, 100, 350, 300),
             species_name="Northern Cardinal",
@@ -112,13 +112,20 @@ def test_image_storage_saves_and_cleans_up():
             timestamp=datetime(2025, 6, 15, 14, 30, 22),
         )
 
-        abs_crop = storage.get_absolute_path(crop_path)
-        abs_thumb = storage.get_absolute_path(thumb_path)
+        abs_crop = storage.get_absolute_path(paths["image_path"])
+        abs_thumb = storage.get_absolute_path(paths["thumbnail_path"])
+        abs_clean = storage.get_absolute_path(paths["clean_crop_path"])
+        abs_frame = storage.get_absolute_path(paths["frame_path"])
         assert abs_crop.exists()
         assert abs_thumb.exists()
+        assert abs_clean.exists()
+        assert abs_frame.exists()
         assert abs_thumb.stat().st_size < abs_crop.stat().st_size
-        assert "northern_cardinal" in crop_path
-        assert "2025/06/15" in crop_path
+        assert abs_frame.stat().st_size >= abs_crop.stat().st_size
+        assert "northern_cardinal" in paths["image_path"]
+        assert "2025/06/15" in paths["image_path"]
+        assert paths["clean_crop_path"].endswith("_clean.jpg")
+        assert paths["frame_path"].endswith("_frame.jpg")
 
         # Save an old image, verify cleanup removes it
         storage.save_detection(
@@ -178,10 +185,12 @@ def test_crop_then_store():
         assert crop.shape == (224, 224, 3)
 
         # Save detection image to disk
-        crop_path, thumb_path = storage.save_detection(
+        paths = storage.save_detection(
             frame, bbox, "House Sparrow", 0.87,
         )
-        assert Path(tmpdir, crop_path).exists()
+        assert Path(tmpdir, paths["image_path"]).exists()
+        assert Path(tmpdir, paths["clean_crop_path"]).exists()
+        assert Path(tmpdir, paths["frame_path"]).exists()
 
 
 def test_weather_api_live():

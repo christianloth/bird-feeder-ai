@@ -98,7 +98,7 @@ class BirdPipeline:
     ):
         """Save a detection to storage and database."""
         try:
-            image_path, thumbnail_path = self.storage.save_detection(
+            paths = self.storage.save_detection(
                 frame=frame,
                 bbox=bbox,
                 species_name=species_name,
@@ -132,8 +132,10 @@ class BirdPipeline:
                     bbox_y1=float(y1),
                     bbox_x2=float(x2),
                     bbox_y2=float(y2),
-                    image_path=image_path,
-                    thumbnail_path=thumbnail_path,
+                    image_path=paths["image_path"],
+                    thumbnail_path=paths["thumbnail_path"],
+                    clean_crop_path=paths["clean_crop_path"],
+                    frame_path=paths["frame_path"],
                 )
                 session.add(detection)
                 session.commit()
@@ -465,7 +467,7 @@ def create_pipeline_dev(
         device=device,
     )
 
-    camera = RTSPCamera(rtsp_url=rtsp_url) if rtsp_url else None
+    camera = RTSPCamera(rtsp_url=rtsp_url)
 
     wildlife_detector = None
     mode_manager = None

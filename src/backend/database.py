@@ -49,7 +49,9 @@ class Species(Base):
     family: Mapped[str | None] = mapped_column(String(200))
     class_index: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
 
-    detections: Mapped[list["Detection"]] = relationship(back_populates="species")
+    detections: Mapped[list["Detection"]] = relationship(
+        back_populates="species", foreign_keys="[Detection.species_id]",
+    )
 
     def __repr__(self) -> str:
         return f"<Species {self.common_name} ({self.scientific_name})>"
@@ -70,10 +72,18 @@ class Detection(Base):
     bbox_y2: Mapped[float | None] = mapped_column(Float)
     image_path: Mapped[str | None] = mapped_column(String(500))
     thumbnail_path: Mapped[str | None] = mapped_column(String(500))
+    clean_crop_path: Mapped[str | None] = mapped_column(String(500))
+    frame_path: Mapped[str | None] = mapped_column(String(500))
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_false_positive: Mapped[bool] = mapped_column(Boolean, default=False)
+    corrected_species_id: Mapped[int | None] = mapped_column(ForeignKey("species.id"))
 
-    species: Mapped[Species | None] = relationship(back_populates="detections")
+    species: Mapped[Species | None] = relationship(
+        back_populates="detections", foreign_keys=[species_id],
+    )
+    corrected_species: Mapped[Species | None] = relationship(
+        foreign_keys=[corrected_species_id],
+    )
 
     __table_args__ = (
         Index("idx_detections_confidence", "confidence"),

@@ -49,9 +49,10 @@ class ImageStorage:
         confidence: float,
         timestamp: datetime | None = None,
         padding: int = 20,
-    ) -> tuple[str, str]:
+    ) -> dict[str, str]:
         """
-        Crop a bird from the frame, save the crop and a thumbnail.
+        Save all images for a detection: annotated crop, clean crop,
+        thumbnail, and full frame.
 
         Args:
             frame: Full camera frame (BGR numpy array from OpenCV).
@@ -62,7 +63,8 @@ class ImageStorage:
             padding: Extra pixels around the bounding box.
 
         Returns:
-            Tuple of (crop_path, thumbnail_path) relative to base_dir.
+            Dict with relative paths: image_path, thumbnail_path,
+            clean_crop_path, frame_path.
         """
         timestamp = timestamp or datetime.now()
         x1, y1, x2, y2 = bbox
@@ -74,41 +76,58 @@ class ImageStorage:
         pad_x2 = min(w, x2 + padding)
         pad_y2 = min(h, y2 + padding)
 
-        # Crop from frame with bounding box drawn
-        crop_bgr = frame[pad_y1:pad_y2, pad_x1:pad_x2].copy()
+        # Clean crop (no annotations -- for training)
+        clean_crop_bgr = frame[pad_y1:pad_y2, pad_x1:pad_x2].copy()
 
-        # Draw red bounding box on the crop (offset bbox coords to crop space)
+        # Annotated crop (red bounding box drawn -- for review)
+        annotated_bgr = clean_crop_bgr.copy()
         box_x1 = x1 - pad_x1
         box_y1 = y1 - pad_y1
         box_x2 = x2 - pad_x1
         box_y2 = y2 - pad_y1
-        cv2.rectangle(crop_bgr, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 255), 2)
-
-        # BGR → RGB for PIL
-        crop_rgb = crop_bgr[:, :, ::-1]
-        img = Image.fromarray(crop_rgb)
+        cv2.rectangle(annotated_bgr, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 255), 2)
 
         # Build paths
         day_dir = self._get_day_dir(timestamp)
         base_name = self._build_filename(timestamp, species_name, confidence)
+
         crop_path = day_dir / f"{base_name}.jpg"
         thumb_path = day_dir / f"{base_name}_thumb.jpg"
+        clean_path = day_dir / f"{base_name}_clean.jpg"
+        frame_path = day_dir / f"{base_name}_frame.jpg"
 
-        # Save full crop
-        img.save(crop_path, "JPEG", quality=settings.crop_quality, optimize=True)
+        # Save annotated crop (with red bbox)
+        annotated_img = Image.fromarray(annotated_bgr[:, :, ::-1])
+        annotated_img.save(crop_path, "JPEG", quality=settings.crop_quality, optimize=True)
 
         # Save thumbnail
-        thumb = img.copy()
+        thumb = annotated_img.copy()
         thumb.thumbnail(settings.thumbnail_size)
         thumb.save(thumb_path, "JPEG", quality=settings.thumbnail_quality, optimize=True)
 
+        # Save clean crop (no annotations -- for classifier retraining)
+        clean_img = Image.fromarray(clean_crop_bgr[:, :, ::-1])
+        clean_img.save(clean_path, "JPEG", quality=settings.crop_quality, optimize=True)
+
+        # Save full frame (for YOLO retraining)
+        frame_img = Image.fromarray(frame[:, :, ::-1])
+        frame_img.save(frame_path, "JPEG", quality=settings.crop_quality, optimize=True)
+
         # Return paths relative to base_dir for database storage
-        rel_crop = str(crop_path.relative_to(self.base_dir))
-        rel_thumb = str(thumb_path.relative_to(self.base_dir))
+        result = {
+            "image_path": str(crop_path.relative_to(self.base_dir)),
+            "thumbnail_path": str(thumb_path.relative_to(self.base_dir)),
+            "clean_crop_path": str(clean_path.relative_to(self.base_dir)),
+            "frame_path": str(frame_path.relative_to(self.base_dir)),
+        }
 
         crop_kb = crop_path.stat().st_size / 1024
-        logger.debug(f"Saved detection image: {rel_crop} ({crop_kb:.0f} KB)")
-        return rel_crop, rel_thumb
+        frame_kb = frame_path.stat().st_size / 1024
+        logger.debug(
+            f"Saved detection: {result['image_path']} "
+            f"(crop={crop_kb:.0f}KB, frame={frame_kb:.0f}KB)"
+        )
+        return result
 
     def get_absolute_path(self, relative_path: str) -> Path:
         """Convert a relative path from the database back to an absolute path."""

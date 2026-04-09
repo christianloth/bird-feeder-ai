@@ -1,25 +1,60 @@
 # Bird Feeder AI
 
-24/7 bird species detection and tracking system using a Raspberry Pi 5, Hailo AI HAT+ 2 (Hailo-10H NPU), and an SV3C 4K PTZ camera pointed at a bird feeder in Frisco, TX.
+24/7 bird and wildlife detection system using a Raspberry Pi 5, Hailo AI HAT+ 2 (Hailo-10H NPU), and an SV3C 4K PTZ camera at a bird feeder in Frisco, TX.
 
-The system identifies birds in real time using a two-stage AI pipeline: YOLOv8n detects birds in the camera feed, then a fine-tuned classifier (EfficientNet-B2 or MobileNetV2) identifies each bird to one of 555 species from the NABirds dataset. All inference runs on-device via the Hailo-10H NPU (40 TOPS INT4 / 20 TOPS INT8), with no cloud dependency. A FastAPI backend with SQLite stores every detection for review and analysis.
+During the day, a two-stage AI pipeline detects and classifies birds to one of 555 species. At night, the system automatically switches to a wildlife detector (11 classes) trained on camera trap data. All inference runs on-device with no cloud dependency.
+
+## Quick Start
+
+### 1. Install
+
+```bash
+uv sync
+```
+
+### 2. Configure
+
+```bash
+cp config/config.yaml.example config/config.yaml
+```
+
+Edit `config/config.yaml` with your camera RTSP URL, location, and preferences.
+
+### 3. Run the pipeline
+
+```bash
+python -m src.pipeline.pipeline --mode dev
+```
+
+That's it. The pipeline connects to your camera, detects birds (day) or wildlife (night), classifies species, and saves everything to the database and disk.
 
 ## Architecture
 
 ```
-Camera (RTSP) --> YOLOv8n (detection) --> Tracker --> EfficientNet-B2 (classification) --> Database
-                  "Is there a bird?"      Dedup       "What species?"                     SQLite
-                  COCO class 14           centroid     555 NABirds classes                 + image crops
+                          DAYTIME                                    NIGHTTIME
+Camera (RTSP) --> YOLOv8n (COCO bird) --> Tracker --> EfficientNet-B2 --> DB
+                  "Is there a bird?"       Dedup      "What species?"     SQLite
+                                                       555 NABirds        + images
+
+Camera (RTSP) --> YOLO11n (wildlife) ---> Tracker ----------------------> DB
+                  "What animal?"           Dedup    class from detector   SQLite
+                  11 classes                                              + images
 ```
 
-**Two-stage pipeline:**
+The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night mode activates 30 minutes after sunset and deactivates 30 minutes before sunrise. Both offsets are configurable.
 
-1. **Detection** -- YOLOv8n identifies birds (COCO class 14) in each frame and outputs bounding boxes.
-2. **Tracking** -- A centroid-based tracker deduplicates detections so a bird sitting on the feeder for 30 seconds is logged once, not 50 times.
-3. **Classification** -- Cropped bird regions are classified by a fine-tuned EfficientNet-B2 (default) or MobileNetV2 on NABirds (555 North American species).
-4. **Storage** -- Detections are saved to SQLite with species, confidence, bounding box, cropped image, and thumbnail. Weather data from Open-Meteo is correlated for activity analysis.
+**Daytime pipeline (bird species):**
+1. **Detection** -- YOLOv8n finds birds (COCO class 14) and outputs bounding boxes
+2. **Tracking** -- Centroid-based tracker deduplicates so a bird sitting for 30 seconds is logged once
+3. **Classification** -- Cropped bird region is classified by EfficientNet-B2 (555 NABirds species)
+4. **Storage** -- Detection saved to SQLite with species, confidence, bbox, annotated crop, clean crop (no bbox), thumbnail, and full frame
 
-**Inference backends** (both detector and classifier support pluggable backends):
+**Nighttime pipeline (wildlife):**
+1. **Detection** -- YOLO11n wildlife model detects 11 classes: bird, bobcat, coyote, raccoon, rabbit, skunk, opossum, squirrel, armadillo, cat, dog
+2. **Tracking** -- Same tracker, reset on mode switch
+3. **Storage** -- Same storage path, species comes directly from the YOLO model (no separate classifier)
+
+**Inference backends:**
 
 | Backend | Use case | Device |
 |---|---|---|
@@ -68,14 +103,234 @@ pip install -e ".[dev]"
 sudo apt install hailo-all
 ```
 
+## Running the Pipeline
+
+### Start live detection
+
+```bash
+python -m src.pipeline.pipeline --mode dev
+```
+
+The RTSP URL comes from `config/config.yaml`. The pipeline runs continuously until you press Ctrl+C.
+
+### CLI options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--mode {dev,hailo}` | `dev` | `dev` for Mac/PC, `hailo` for Raspberry Pi |
+| `--image PATH` | None | Process a single image instead of live camera |
+| `--checkpoint PATH` | `models/bird-classifier/efficientnet_b2/best_model.pth` | Path to classifier checkpoint |
+| `--rtsp-url URL` | From config | RTSP camera URL (overrides config) |
+| `--device {mps,cuda,cpu}` | Auto-detected | Force compute device |
+| `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` | From config | Logging verbosity |
+| `--no-night` | Off | Disable night mode (daytime bird detection only) |
+
+### Examples
+
+Test on a single image:
+
+```bash
+python -m src.pipeline.pipeline --mode dev --image path/to/bird.jpg
+```
+
+Run with verbose logging (see per-frame inference timing, tracker details):
+
+```bash
+python -m src.pipeline.pipeline --mode dev --log-level DEBUG
+```
+
+Run with only warnings and errors (quiet mode):
+
+```bash
+python -m src.pipeline.pipeline --mode dev --log-level WARNING
+```
+
+Disable night mode (bird detection only, no wildlife switching):
+
+```bash
+python -m src.pipeline.pipeline --mode dev --no-night
+```
+
+Force CPU for testing:
+
+```bash
+python -m src.pipeline.pipeline --mode dev --image bird.jpg --device cpu
+```
+
+### Hailo production mode (Raspberry Pi)
+
+```bash
+python -m src.pipeline.pipeline --mode hailo
+```
+
+Uses pre-compiled HEF models on the Hailo NPU. Model paths are configurable in `config/config.yaml`.
+
+### What gets saved per detection
+
+Each detection writes 4 image files and a database row:
+
+| File | Purpose |
+|---|---|
+| `{name}.jpg` | Annotated crop with red bounding box (for visual review) |
+| `{name}_thumb.jpg` | Thumbnail of annotated crop |
+| `{name}_clean.jpg` | Clean crop without annotations (for classifier retraining) |
+| `{name}_frame.jpg` | Full original frame (for YOLO retraining) |
+
+Images are saved to `detections/YYYY/MM/DD/`. Bounding box coordinates are stored in the database as absolute pixel values.
+
+### Logging levels
+
+| Level | What you see |
+|---|---|
+| `DEBUG` | Per-frame inference timing, tracker lifecycle, classification scores, mode check results |
+| `INFO` | Startup config, detections, mode transitions, 5-minute status summaries |
+| `WARNING` | Slow inference (>500ms detect, >200ms classify), empty crops, high track counts, reconnection attempts |
+| `ERROR` | Frame processing failures, database save failures, API failures |
+| `CRITICAL` | Model file not found, camera unreachable after max retries |
+
+## API Server
+
+The FastAPI backend provides a REST API for querying detections, reviewing them, and correcting misclassifications.
+
+### Start the API server
+
+```bash
+uvicorn src.backend.api:app --host 0.0.0.0 --port 8000
+```
+
+Interactive API docs: `http://localhost:8000/docs`
+
+### Key endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/api/detections` | List detections (filterable by species, date, confidence) |
+| `GET` | `/api/detections/{id}` | Get a single detection with all metadata |
+| `PATCH` | `/api/detections/{id}/review` | Review: confirm, reject, or correct species |
+| `GET` | `/api/stats` | Overall detection statistics |
+| `GET` | `/api/stats/species` | Detection count per species |
+| `GET` | `/api/stats/hourly` | Hourly detection counts for a given day |
+| `GET` | `/api/species` | List all known species |
+| `GET` | `/api/species/{id}` | Get species details |
+| `GET` | `/api/weather/current` | Current weather at the feeder location |
+| `GET` | `/api/daily` | Daily summary data (last N days) |
+| `GET` | `/api/system/status` | System health (disk usage, uptime, detection count) |
+| `POST` | `/api/system/cleanup` | Trigger old image cleanup |
+
+### Query parameters for `/api/detections`
+
+- `skip` / `limit` -- Pagination (limit max 500)
+- `species_id` -- Filter by species
+- `since` / `until` -- Date range filter
+- `min_confidence` -- Minimum confidence threshold
+
+### Reviewing detections
+
+Mark a detection as correct:
+
+```bash
+curl -X PATCH http://localhost:8000/api/detections/1/review \
+  -H "Content-Type: application/json" \
+  -d '{"is_false_positive": false}'
+```
+
+Mark as false positive (not a real bird/animal):
+
+```bash
+curl -X PATCH http://localhost:8000/api/detections/1/review \
+  -H "Content-Type: application/json" \
+  -d '{"is_false_positive": true}'
+```
+
+Correct a misclassification (e.g., classifier said Common Ground-Dove but it's actually a Mourning Dove with species ID 42):
+
+```bash
+curl -X PATCH http://localhost:8000/api/detections/1/review \
+  -H "Content-Type: application/json" \
+  -d '{"is_false_positive": false, "corrected_species_id": 42}'
+```
+
+The corrected species label is used when exporting training data, so your corrections feed back into the next model.
+
+## Exporting Training Data
+
+After accumulating detections, export them as labeled training data for retraining your models. The export script queries the database, deduplicates near-identical images using perceptual hashing, and outputs data in the format your training pipeline expects.
+
+### Export commands
+
+```bash
+# Export everything (both classifier + YOLO formats)
+python -m scripts.export_training_data --format both --clean
+
+# Only high-confidence detections
+python -m scripts.export_training_data --format both --min-confidence 0.7
+
+# Only manually reviewed detections
+python -m scripts.export_training_data --format both --reviewed-only
+
+# Classification format only (for retraining EfficientNet)
+python -m scripts.export_training_data --format classification --min-confidence 0.5
+
+# YOLO format only (for retraining the detector)
+python -m scripts.export_training_data --format yolo
+
+# Filter by date
+python -m scripts.export_training_data --format both --since 2026-04-01
+```
+
+### Export options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format {classification,yolo,both}` | `both` | Export format |
+| `--min-confidence` | `0.0` | Minimum confidence threshold |
+| `--reviewed-only` | Off | Only export reviewed detections |
+| `--include-false-positives` | Off | Include detections marked as false positives |
+| `--since DATE` | None | Only export detections after this date (ISO format) |
+| `--dedup-threshold` | `5` | Perceptual hash Hamming distance (lower = stricter dedup) |
+| `--val-split` | `0.2` | Fraction of data for validation (YOLO export) |
+| `--clean` | Off | Delete existing export directory before exporting |
+
+### Output structure
+
+**Classification** (ImageFolder format for EfficientNet/MobileNetV2 retraining):
+
+```
+data/field-collected/classification/
+  mourning_dove/
+    20260327_135012_mourning_dove_0.98.jpg
+    20260327_135000_mourning_dove_0.97.jpg
+  inca_dove/
+    20260327_135000_inca_dove_0.86.jpg
+  manifest.txt
+```
+
+**YOLO** (for detector retraining):
+
+```
+data/field-collected/yolo/
+  images/
+    train/
+      20260327_135012_mourning_dove_0.98_frame.jpg
+    val/
+      20260327_135000_inca_dove_0.86_frame.jpg
+  labels/
+    train/
+      20260327_135012_mourning_dove_0.98_frame.txt   # class_id cx cy w h
+    val/
+      20260327_135000_inca_dove_0.86_frame.txt
+  dataset.yaml
+```
+
 ## Training
 
-The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species. Two architectures are supported:
+The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species.
 
 | Model | Input Size | Params | Training Strategy | LR Scheduler |
 |---|---|---|---|---|
 | **EfficientNet-B2** (default) | 260x260 | 7.8M | Single-phase end-to-end | ReduceLROnPlateau |
-| **MobileNetV2** | 224x224 | 3.4M | Two-phase (freeze → unfreeze) | StepLR |
+| **MobileNetV2** | 224x224 | 3.4M | Two-phase (freeze then unfreeze) | StepLR |
 
 ### 1. Download the NABirds dataset
 
@@ -117,8 +372,8 @@ Each run creates a timestamped folder:
 ```
 models/bird-classifier/efficientnet_b2/
   2026-03-27_04-12/
-    best_model.pth          # Best weights from this run (by val accuracy)
-    checkpoint.pth          # Full state for --resume (model + optimizer + scheduler)
+    best_model.pth          # Best weights (by val accuracy)
+    checkpoint.pth          # Full state for --resume
     training_history.png    # Loss and accuracy curves
     confusion_matrices/     # Per-epoch confusion matrix images
 ```
@@ -137,7 +392,7 @@ Each epoch prints detailed validation metrics:
 python -m src.training.train --resume
 ```
 
-Automatically finds the latest run's checkpoint and continues from where it left off (preserving optimizer and scheduler state). Checkpoints are saved atomically after every epoch, so Ctrl+C is safe.
+Automatically finds the latest run's checkpoint and continues from where it left off (preserving optimizer and scheduler state). Checkpoints are saved atomically after every epoch.
 
 ### 3. Export to ONNX
 
@@ -157,107 +412,29 @@ The ONNX model is the intermediate step in the deployment chain:
 PyTorch (.pth) --> ONNX (.onnx) --> Hailo DFC compiler --> HEF (.hef)
 ```
 
-## Running the Pipeline
-
-### CLI usage
-
-```bash
-python -m src.pipeline.pipeline [OPTIONS]
-```
-
-### Options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--mode {dev,hailo}` | `dev` | Deployment mode: `dev` for Mac/PC, `hailo` for Raspberry Pi |
-| `--image PATH` | None | Process a single image instead of live camera |
-| `--checkpoint PATH` | `models/bird-classifier/efficientnet_b2/best_model.pth` | Path to trained model checkpoint (dev mode) |
-| `--rtsp-url URL` | From config | RTSP camera URL (overrides `config/settings.py`) |
-| `--device {mps,cuda,cpu}` | Auto-detected | Force compute device (dev mode only) |
-
-### Development mode (Mac / PC)
-
-Test on a single image:
-
-```bash
-python -m src.pipeline.pipeline --mode dev --image path/to/bird.jpg
-```
-
-Run with a live camera:
-
-```bash
-python -m src.pipeline.pipeline --mode dev --rtsp-url rtsp://user:pass@192.168.1.100:554/stream1
-```
-
-Force a specific device:
-
-```bash
-python -m src.pipeline.pipeline --mode dev --image bird.jpg --device cpu
-```
-
-Development mode uses Ultralytics YOLO for detection and PyTorch for classification. It auto-selects MPS (Apple Silicon), CUDA (NVIDIA), or CPU.
-
-### Hailo production mode (Raspberry Pi)
-
-```bash
-python -m src.pipeline.pipeline --mode hailo --rtsp-url rtsp://user:pass@192.168.1.100:554/stream1
-```
-
-Production mode uses pre-compiled HEF models on the Hailo NPU for both detection and classification. Model paths are configurable in `config/settings.py`.
-
-## API
-
-The FastAPI backend provides a REST API for querying detections, species stats, and system status.
-
-### Start the API server
-
-```bash
-uvicorn src.backend.api:app --host 0.0.0.0 --port 8000
-```
-
-Interactive API docs are available at `http://localhost:8000/docs`.
-
-### Key endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `GET` | `/api/detections` | List detections (filterable by species, date range, confidence) |
-| `GET` | `/api/detections/{id}` | Get a single detection |
-| `PATCH` | `/api/detections/{id}/review` | Mark detection as correct or false positive |
-| `GET` | `/api/stats` | Overall detection statistics |
-| `GET` | `/api/stats/species` | Detection count per species |
-| `GET` | `/api/stats/hourly` | Hourly detection counts for a given day |
-| `GET` | `/api/species` | List all known species |
-| `GET` | `/api/species/{id}` | Get species details |
-| `GET` | `/api/weather/current` | Current weather at the feeder location |
-| `GET` | `/api/daily` | Daily summary data (last N days) |
-| `GET` | `/api/system/status` | System health (disk usage, uptime, detection count) |
-| `POST` | `/api/system/cleanup` | Trigger old image cleanup |
-
-### Query parameters for `/api/detections`
-
-- `skip` / `limit` -- Pagination (limit max 500)
-- `species_id` -- Filter by species
-- `since` / `until` -- Date range filter
-- `min_confidence` -- Minimum confidence threshold
-
 ## Configuration
 
-All settings are managed in `config/settings.py` using Pydantic Settings. Every setting can be overridden with an environment variable using the `BIRD_` prefix.
+All settings are in `config/config.yaml`. Copy the example to get started:
 
-| Setting | Env var | Default | Description |
+```bash
+cp config/config.yaml.example config/config.yaml
+```
+
+This file is gitignored (contains camera credentials). Key settings:
+
+| Section | Setting | Default | Description |
 |---|---|---|---|
-| `rtsp_url` | `BIRD_RTSP_URL` | `rtsp://admin:password@...` | Camera RTSP stream URL |
-| `detection_confidence_threshold` | `BIRD_DETECTION_CONFIDENCE_THRESHOLD` | `0.4` | Minimum YOLO confidence |
-| `classification_confidence_threshold` | `BIRD_CLASSIFICATION_CONFIDENCE_THRESHOLD` | `0.5` | Minimum species confidence |
-| `batch_size` | `BIRD_BATCH_SIZE` | `32` | Training batch size |
-| `learning_rate` | `BIRD_LEARNING_RATE` | `0.001` | Training learning rate |
-| `num_epochs` | `BIRD_NUM_EPOCHS` | `25` | Training epochs |
-| `save_crops` | `BIRD_SAVE_CROPS` | `True` | Save detection crop images |
-| `retention_days` | `BIRD_RETENTION_DAYS` | `90` | Days to keep crop images |
-| `latitude` / `longitude` | `BIRD_LATITUDE` / `BIRD_LONGITUDE` | Frisco, TX | Weather location |
-| `database_url` | `BIRD_DATABASE_URL` | `sqlite:///data/birds.db` | SQLite database path |
+| Top-level | `log_level` | `INFO` | Logging verbosity |
+| `camera` | `rtsp_url` | -- | Camera RTSP stream URL |
+| `detection` | `confidence_threshold` | `0.4` | Minimum YOLO detection confidence |
+| `classification` | `confidence_threshold` | `0.10` | Minimum species classification confidence |
+| `wildlife` | `confidence_threshold` | `0.4` | Minimum wildlife detection confidence |
+| `day_night` | `enabled` | `true` | Enable automatic day/night mode switching |
+| `day_night` | `night_offset_minutes` | `30` | Start night mode N minutes after sunset |
+| `day_night` | `day_offset_minutes` | `30` | Start day mode N minutes before sunrise |
+| `pipeline` | `process_every_n` | `5` | Process every Nth frame |
+| `location` | `latitude` / `longitude` | Frisco, TX | Location for sunrise/sunset calculation |
+| `storage` | `retention_days` | `90` | Delete detection images older than this |
 
 ## License
 

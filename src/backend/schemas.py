@@ -47,14 +47,19 @@ class DetectionResponse(BaseModel):
     bbox_y2: float | None = None
     image_path: str | None = None
     thumbnail_path: str | None = None
+    clean_crop_path: str | None = None
+    frame_path: str | None = None
     reviewed: bool = False
     is_false_positive: bool = False
+    corrected_species_id: int | None = None
+    corrected_species_name: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class DetectionReview(BaseModel):
     is_false_positive: bool = False
+    corrected_species_id: int | None = None  # Set if the species was misidentified
 
 
 class DetectionStats(BaseModel):
