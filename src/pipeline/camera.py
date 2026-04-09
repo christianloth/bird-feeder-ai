@@ -85,10 +85,11 @@ class RTSPCamera:
             height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = self._cap.get(cv2.CAP_PROP_FPS)
             logger.info(f"Connected to RTSP stream: {width}x{height} @ {fps:.1f} FPS")
+            logger.debug(f"RTSP URL: {self.rtsp_url}")
             self._connected = True
             return True
 
-        logger.error(f"Failed to connect to RTSP stream: {self.rtsp_url}")
+        logger.error(f"Failed to open RTSP stream: {self.rtsp_url}")
         self._connected = False
         return False
 
@@ -99,22 +100,30 @@ class RTSPCamera:
         while self._running:
             if not self._connected:
                 if self.max_reconnect_attempts > 0 and reconnect_attempts >= self.max_reconnect_attempts:
-                    logger.error("Max reconnection attempts reached. Stopping.")
+                    logger.critical(
+                        f"Camera unreachable after {reconnect_attempts} attempts. "
+                        "Stopping capture thread."
+                    )
                     self._running = False
                     break
 
-                logger.info(f"Reconnecting in {self.reconnect_delay}s (attempt {reconnect_attempts + 1})...")
-                time.sleep(self.reconnect_delay)
                 reconnect_attempts += 1
+                logger.warning(
+                    f"Reconnecting in {self.reconnect_delay}s "
+                    f"(attempt {reconnect_attempts}/"
+                    f"{'unlimited' if self.max_reconnect_attempts == 0 else self.max_reconnect_attempts})"
+                )
+                time.sleep(self.reconnect_delay)
 
                 if self.connect():
                     reconnect_attempts = 0
+                    logger.info("Reconnected to RTSP stream")
                 continue
 
             ret, frame = self._cap.read()
 
             if not ret or frame is None:
-                logger.warning("Failed to read frame. Connection may be lost.")
+                logger.warning("Failed to read frame, connection may be lost")
                 self._connected = False
                 continue
 

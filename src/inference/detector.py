@@ -10,12 +10,15 @@ Both support:
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from config.settings import settings
+
+SLOW_INFERENCE_MS = 500  # Log a warning if inference takes longer than this
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +63,13 @@ class BirdDetector:
         from ultralytics import YOLO
 
         model_path = model_path or "yolov8n.pt"
+        logger.debug(f"Loading YOLO detector from {model_path}")
         model = YOLO(str(model_path))
 
         if device:
             model.to(device)
 
-        logger.info(f"Loaded YOLO detector from {model_path}")
+        logger.info(f"Loaded YOLO detector from {model_path} (device={device or 'auto'})")
         return cls(
             backend="ultralytics",
             model=model,
@@ -82,6 +86,11 @@ class BirdDetector:
         from hailo_platform import HEF, VDevice, ConfigureParams
 
         hef_path = hef_path or settings.detection_model_path
+        if not Path(hef_path).exists():
+            logger.critical(f"Detection model not found: {hef_path}")
+            raise FileNotFoundError(f"Detection HEF model not found: {hef_path}")
+
+        logger.debug(f"Loading Hailo YOLO detector from {hef_path}")
         hef = HEF(str(hef_path))
         vdevice = VDevice()
         infer_model = vdevice.configure(hef, ConfigureParams.create_from_hef(hef))
@@ -174,12 +183,21 @@ class BirdDetector:
             (bboxes, confidences) — list of (x1, y1, x2, y2) boxes and their scores.
             Only birds (COCO class 14) above the confidence threshold are returned.
         """
+        t0 = time.perf_counter()
+
         if self.backend == "ultralytics":
-            return self._detect_ultralytics(frame)
+            bboxes, confidences = self._detect_ultralytics(frame)
         elif self.backend == "hailo":
-            return self._detect_hailo(frame)
+            bboxes, confidences = self._detect_hailo(frame)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(f"Bird detect: {len(bboxes)} found in {elapsed_ms:.1f}ms")
+        if elapsed_ms > SLOW_INFERENCE_MS:
+            logger.warning(f"Slow bird detection: {elapsed_ms:.0f}ms (threshold={SLOW_INFERENCE_MS}ms)")
+
+        return bboxes, confidences
 
 
 @dataclass
@@ -236,12 +254,17 @@ class WildlifeDetector:
         from ultralytics import YOLO
 
         model_path = model_path or settings.wildlife_model_path
+        if not Path(model_path).exists():
+            logger.critical(f"Wildlife model not found: {model_path}")
+            raise FileNotFoundError(f"Wildlife model not found: {model_path}")
+
+        logger.debug(f"Loading wildlife detector from {model_path}")
         model = YOLO(str(model_path))
 
         if device:
             model.to(device)
 
-        logger.info(f"Loaded wildlife detector from {model_path}")
+        logger.info(f"Loaded wildlife detector from {model_path} (device={device or 'auto'})")
         return cls(
             backend="ultralytics",
             model=model,
@@ -258,6 +281,11 @@ class WildlifeDetector:
         from hailo_platform import HEF, VDevice, ConfigureParams
 
         hef_path = hef_path or settings.wildlife_model_path
+        if not Path(hef_path).exists():
+            logger.critical(f"Wildlife HEF model not found: {hef_path}")
+            raise FileNotFoundError(f"Wildlife HEF model not found: {hef_path}")
+
+        logger.debug(f"Loading Hailo wildlife detector from {hef_path}")
         hef = HEF(str(hef_path))
         vdevice = VDevice()
         infer_model = vdevice.configure(hef, ConfigureParams.create_from_hef(hef))
@@ -279,12 +307,25 @@ class WildlifeDetector:
         Returns:
             List of WildlifeDetection objects with bbox, confidence, and class info.
         """
+        t0 = time.perf_counter()
+
         if self.backend == "ultralytics":
-            return self._detect_ultralytics(frame)
+            detections = self._detect_ultralytics(frame)
         elif self.backend == "hailo":
-            return self._detect_hailo(frame)
+            detections = self._detect_hailo(frame)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        if detections:
+            classes_found = ", ".join(d.class_name for d in detections)
+            logger.debug(f"Wildlife detect: {len(detections)} found [{classes_found}] in {elapsed_ms:.1f}ms")
+        else:
+            logger.debug(f"Wildlife detect: 0 found in {elapsed_ms:.1f}ms")
+        if elapsed_ms > SLOW_INFERENCE_MS:
+            logger.warning(f"Slow wildlife detection: {elapsed_ms:.0f}ms (threshold={SLOW_INFERENCE_MS}ms)")
+
+        return detections
 
     def _detect_ultralytics(self, frame: np.ndarray) -> list[WildlifeDetection]:
         """Run detection with Ultralytics backend."""

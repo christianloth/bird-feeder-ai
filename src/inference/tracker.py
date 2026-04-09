@@ -147,11 +147,18 @@ class BirdTracker:
                 last_seen=now,
             )
             self._tracks[self._next_id] = track
+            logger.debug(f"New track {self._next_id} at centroid ({centroid[0]:.0f}, {centroid[1]:.0f})")
             self._next_id += 1
 
             # If min_frames is 1, immediately ready
             if self.min_frames_for_detection <= 1:
                 new_tracks_ready.append(track)
+
+        if len(self._tracks) > 20:
+            logger.warning(
+                f"High track count: {len(self._tracks)} active tracks "
+                "(possible false positive burst)"
+            )
 
         return new_tracks_ready
 

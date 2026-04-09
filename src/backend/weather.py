@@ -54,13 +54,14 @@ class WeatherService:
             "timezone": self.timezone,
         }
 
+        logger.debug(f"Fetching current weather for ({self.latitude}, {self.longitude})")
         try:
             response = self._client.get(OPEN_METEO_URL, params=params)
             response.raise_for_status()
             data = response.json()
 
             current = data.get("current", {})
-            return {
+            result = {
                 "temperature_c": current.get("temperature_2m"),
                 "humidity_pct": current.get("relative_humidity_2m"),
                 "wind_speed_kmh": current.get("wind_speed_10m"),
@@ -69,6 +70,12 @@ class WeatherService:
                 "weather_code": current.get("weather_code"),
                 "timestamp": datetime.fromisoformat(current["time"]) if "time" in current else datetime.now(),
             }
+            logger.debug(
+                f"Weather: {result['temperature_c']}C, "
+                f"{result['humidity_pct']}% humidity, "
+                f"code={result['weather_code']}"
+            )
+            return result
         except (httpx.HTTPError, KeyError) as e:
             logger.error(f"Failed to fetch current weather: {e}")
             return None
@@ -90,6 +97,7 @@ class WeatherService:
             "end_date": target_date.isoformat(),
         }
 
+        logger.debug(f"Fetching sun times for {target_date}")
         try:
             response = self._client.get(OPEN_METEO_URL, params=params)
             response.raise_for_status()
@@ -100,10 +108,17 @@ class WeatherService:
             sunset_list = daily.get("sunset", [])
 
             if sunrise_list and sunset_list:
-                return {
+                result = {
                     "sunrise": datetime.fromisoformat(sunrise_list[0]),
                     "sunset": datetime.fromisoformat(sunset_list[0]),
                 }
+                logger.debug(
+                    f"Sun times: sunrise={result['sunrise'].strftime('%H:%M')}, "
+                    f"sunset={result['sunset'].strftime('%H:%M')}"
+                )
+                return result
+
+            logger.error(f"Open-Meteo returned empty sun times for {target_date}")
         except (httpx.HTTPError, KeyError, IndexError) as e:
             logger.error(f"Failed to fetch sun times: {e}")
 

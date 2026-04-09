@@ -33,7 +33,8 @@ Thumbs.db
 # Claude local files (contains camera credentials)
 .claude/
 
-# Camera credentials
+# Config (contains camera credentials)
+config/config.yaml
 config/camera.yaml
 
 # Saved images

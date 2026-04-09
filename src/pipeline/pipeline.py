@@ -73,6 +73,7 @@ class BirdPipeline:
 
     def _init_database(self):
         """Initialize database tables and species lookup."""
+        logger.debug("Initializing database connection")
         engine = create_tables()
         self._session_factory = get_session_factory(engine)
 
@@ -81,6 +82,9 @@ class BirdPipeline:
         if classes_file.exists():
             with self._session_factory() as session:
                 load_species_from_dataset(session, classes_file)
+            logger.debug("Species lookup table loaded")
+        else:
+            logger.warning(f"NABirds classes file not found at {classes_file}")
 
     def _save_detection(
         self,
@@ -93,37 +97,49 @@ class BirdPipeline:
         classifier_model: str = "mobilenetv2_nabirds",
     ):
         """Save a detection to storage and database."""
-        # Save crop and thumbnail
-        image_path, thumbnail_path = self.storage.save_detection(
-            frame=frame,
-            bbox=bbox,
-            species_name=species_name,
-            confidence=confidence,
-            timestamp=timestamp,
-        )
-
-        # Find species in database
-        with self._session_factory() as session:
-            species = session.query(Species).filter(
-                Species.common_name == species_name
-            ).first()
-
-            x1, y1, x2, y2 = bbox
-            detection = Detection(
-                timestamp=timestamp,
-                species_id=species.id if species else None,
+        try:
+            image_path, thumbnail_path = self.storage.save_detection(
+                frame=frame,
+                bbox=bbox,
+                species_name=species_name,
                 confidence=confidence,
-                detection_model=detection_model,
-                classifier_model=classifier_model,
-                bbox_x1=float(x1),
-                bbox_y1=float(y1),
-                bbox_x2=float(x2),
-                bbox_y2=float(y2),
-                image_path=image_path,
-                thumbnail_path=thumbnail_path,
+                timestamp=timestamp,
             )
-            session.add(detection)
-            session.commit()
+        except OSError as e:
+            logger.error(f"Failed to save detection image for {species_name}: {e}")
+            return
+
+        try:
+            with self._session_factory() as session:
+                species = session.query(Species).filter(
+                    Species.common_name == species_name
+                ).first()
+
+                if species is None:
+                    logger.warning(
+                        f"Species '{species_name}' not found in database, "
+                        "detection will have no species link"
+                    )
+
+                x1, y1, x2, y2 = bbox
+                detection = Detection(
+                    timestamp=timestamp,
+                    species_id=species.id if species else None,
+                    confidence=confidence,
+                    detection_model=detection_model,
+                    classifier_model=classifier_model,
+                    bbox_x1=float(x1),
+                    bbox_y1=float(y1),
+                    bbox_x2=float(x2),
+                    bbox_y2=float(y2),
+                    image_path=image_path,
+                    thumbnail_path=thumbnail_path,
+                )
+                session.add(detection)
+                session.commit()
+        except Exception as e:
+            logger.error(f"Failed to save detection to database: {e}")
+            return
 
         self._total_detections += 1
         logger.info(f"Detection #{self._total_detections}: {species_name} ({confidence:.2f})")
@@ -171,7 +187,10 @@ class BirdPipeline:
         new_detections = []
 
         # 1. Detect birds
+        t0 = time.perf_counter()
         bboxes, confidences = self.detector.detect(frame)
+        det_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms")
 
         # 2. Update tracker
         new_tracks = self.tracker.update(bboxes, timestamp)
@@ -180,16 +199,21 @@ class BirdPipeline:
         for track in new_tracks:
             crop = crop_bird_roi(frame, track.bbox)
             if crop.size == 0:
+                logger.warning(f"Empty crop for track {track.track_id}, skipping")
                 continue
 
+            t0 = time.perf_counter()
             species_name, conf = self.classifier.predict(crop)
+            cls_ms = (time.perf_counter() - t0) * 1000
+            logger.debug(
+                f"Classification: {species_name} ({conf:.2f}) in {cls_ms:.1f}ms"
+            )
+
             if species_name is None:
                 continue
 
-            # Update tracker with classification result
             self.tracker.mark_classified(track.track_id, species_name, conf)
 
-            # Save to storage and database
             dt = datetime.fromtimestamp(timestamp)
             if self._session_factory and settings.save_crops:
                 self._save_detection(
@@ -214,7 +238,10 @@ class BirdPipeline:
         new_detections = []
 
         # 1. Detect wildlife -- returns class names directly
+        t0 = time.perf_counter()
         wildlife_dets = self.wildlife_detector.detect(frame)
+        det_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(f"Wildlife detection: {len(wildlife_dets)} animals in {det_ms:.1f}ms")
 
         bboxes = [d.bbox for d in wildlife_dets]
 
@@ -223,7 +250,6 @@ class BirdPipeline:
 
         # 3. Match new tracks to their wildlife detections
         for track in new_tracks:
-            # Find the wildlife detection that matches this track's bbox
             matched_det = None
             for wd in wildlife_dets:
                 if wd.bbox == track.bbox:
@@ -231,6 +257,7 @@ class BirdPipeline:
                     break
 
             if matched_det is None:
+                logger.debug(f"No wildlife detection match for track {track.track_id}")
                 continue
 
             species_name = matched_det.class_name
@@ -262,6 +289,7 @@ class BirdPipeline:
         Press Ctrl+C to stop gracefully.
         """
         if self.camera is None:
+            logger.critical("No camera configured. Cannot start pipeline.")
             raise RuntimeError("No camera configured. Use run_on_image() for single images.")
 
         self._init_database()
@@ -269,7 +297,7 @@ class BirdPipeline:
 
         # Graceful shutdown on Ctrl+C
         def signal_handler(sig, frame):
-            logger.info("Shutting down pipeline...")
+            logger.info("Received shutdown signal (SIGINT/SIGTERM)")
             self._running = False
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -281,13 +309,20 @@ class BirdPipeline:
         if self.wildlife_detector:
             logger.info(f"  Wildlife detector: {self.wildlife_detector.backend}")
         if self.mode_manager:
-            logger.info("  Day/night mode: camera IR sync enabled")
+            logger.info("  Day/night mode: sun-time switching enabled")
             self.mode_manager.check_now()
             logger.info(f"  Initial mode: {self.mode_manager.mode.value}")
+        else:
+            logger.info("  Day/night mode: disabled (daytime only)")
         logger.info(f"  Processing every {self.skipper.process_every_n} frames")
 
-        self.camera.start()
+        if not self.camera.start():
+            logger.critical("Failed to connect to camera. Pipeline cannot start.")
+            return
+
         frames_processed = 0
+        last_status_time = time.time()
+        status_interval = 300  # Log a status summary every 5 minutes
 
         try:
             while self._running:
@@ -299,18 +334,42 @@ class BirdPipeline:
                 if not self.skipper.should_process(frame_result.frame_number):
                     continue
 
-                detections = self.process_frame(frame_result.frame, frame_result.timestamp)
+                try:
+                    detections = self.process_frame(
+                        frame_result.frame, frame_result.timestamp,
+                    )
+                except Exception as e:
+                    logger.error(f"Frame processing failed: {e}", exc_info=True)
+                    continue
+
                 frames_processed += 1
 
                 if detections:
                     for det in detections:
-                        print(f"  Bird: {det['species']} ({det['confidence']:.2f})")
+                        logger.info(
+                            f"  {det['species']} ({det['confidence']:.2f}) "
+                            f"track={det['track_id']}"
+                        )
+
+                # Periodic status summary
+                now = time.time()
+                if now - last_status_time >= status_interval:
+                    mode_str = (
+                        f", mode={self.mode_manager.mode.value}"
+                        if self.mode_manager else ""
+                    )
+                    logger.info(
+                        f"Status: {frames_processed} frames processed, "
+                        f"{self._total_detections} total detections, "
+                        f"{self.tracker.active_count} active tracks{mode_str}"
+                    )
+                    last_status_time = now
 
         finally:
             self.camera.stop()
             logger.info(
                 f"Pipeline stopped. Processed {frames_processed} frames, "
-                f"{self._total_detections} birds detected."
+                f"{self._total_detections} detections total."
             )
 
     def run_on_image(self, image_path: str | Path) -> list[dict]:
@@ -483,11 +542,6 @@ def _load_class_names() -> dict[int, str]:
 if __name__ == "__main__":
     import argparse
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-
     parser = argparse.ArgumentParser(description="Bird Feeder AI Pipeline")
     parser.add_argument(
         "--mode", choices=["dev", "hailo"], default="dev",
@@ -513,7 +567,20 @@ if __name__ == "__main__":
         "--no-night", action="store_true",
         help="Disable night mode (wildlife detection) switching",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Set logging verbosity (default: from .env or INFO)",
+    )
     args = parser.parse_args()
+
+    log_level = args.log_level or settings.log_level
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     if args.mode == "dev":
         pipeline = create_pipeline_dev(

@@ -85,10 +85,17 @@ class DayNightManager:
         if self._sun_date == today:
             return True
 
+        logger.debug(f"Refreshing sun times for {today}")
         sun_times = self._weather.get_daily_sun_times(today)
         if sun_times is None:
             logger.error("Failed to fetch sunrise/sunset times from Open-Meteo")
-            return self._day_start is not None  # use stale data if available
+            if self._day_start is not None:
+                logger.warning(
+                    f"Using stale sun times from {self._sun_date} "
+                    "due to API failure"
+                )
+                return True
+            return False
 
         sunrise = sun_times["sunrise"].replace(tzinfo=self._tz)
         sunset = sun_times["sunset"].replace(tzinfo=self._tz)
@@ -143,6 +150,7 @@ class DayNightManager:
             )
             return True
 
+        logger.debug(f"Mode check: still {self._mode.value}")
         return False
 
     def force_mode(self, mode: PipelineMode) -> None:

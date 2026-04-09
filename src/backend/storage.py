@@ -106,7 +106,8 @@ class ImageStorage:
         rel_crop = str(crop_path.relative_to(self.base_dir))
         rel_thumb = str(thumb_path.relative_to(self.base_dir))
 
-        logger.debug(f"Saved detection image: {rel_crop}")
+        crop_kb = crop_path.stat().st_size / 1024
+        logger.debug(f"Saved detection image: {rel_crop} ({crop_kb:.0f} KB)")
         return rel_crop, rel_thumb
 
     def get_absolute_path(self, relative_path: str) -> Path:
@@ -148,7 +149,9 @@ class ImageStorage:
                     day_dir.rmdir()
 
         if deleted > 0:
-            logger.info(f"Cleaned up {deleted} images older than {retention_days} days.")
+            logger.info(f"Cleaned up {deleted} images older than {retention_days} days")
+        else:
+            logger.debug(f"No images older than {retention_days} days to clean up")
 
         return deleted
 

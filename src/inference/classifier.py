@@ -8,6 +8,7 @@ Runs a fine-tuned model (MobileNetV2 or EfficientNet-B2) on cropped bird images.
 """
 
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,8 @@ import torch.nn as nn
 from PIL import Image
 
 from src.training.transforms import get_inference_transforms
+
+SLOW_CLASSIFY_MS = 200  # Log a warning if classification takes longer than this
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,11 @@ class BirdClassifier:
         """Load a PyTorch checkpoint. Auto-selects MPS/CUDA/CPU."""
         from src.training.model import create_model, get_model_config
 
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            logger.critical(f"Classifier checkpoint not found: {checkpoint_path}")
+            raise FileNotFoundError(f"Classifier checkpoint not found: {checkpoint_path}")
+
         model_config = get_model_config(model_name)
 
         if device is None:
@@ -74,6 +82,7 @@ class BirdClassifier:
         else:
             dev = torch.device(device)
 
+        logger.debug(f"Loading {model_name} classifier from {checkpoint_path}")
         model = create_model(
             num_classes=num_classes, pretrained=False,
             freeze_backbone=False, model_name=model_name,
@@ -82,7 +91,10 @@ class BirdClassifier:
         model = model.to(dev)
         model.eval()
 
-        logger.info(f"Loaded {model_name} classifier on {dev} from {checkpoint_path}")
+        logger.info(
+            f"Loaded {model_name} classifier on {dev} from {checkpoint_path} "
+            f"({num_classes} classes, threshold={confidence_threshold})"
+        )
         return cls(
             backend="pytorch",
             model=model,
@@ -123,6 +135,11 @@ class BirdClassifier:
         """Load a Hailo HEF model for NPU inference on Raspberry Pi."""
         from hailo_platform import HEF, VDevice, ConfigureParams
 
+        if not Path(hef_path).exists():
+            logger.critical(f"Classifier HEF model not found: {hef_path}")
+            raise FileNotFoundError(f"Classifier HEF model not found: {hef_path}")
+
+        logger.debug(f"Loading Hailo classifier from {hef_path}")
         hef = HEF(str(hef_path))
         vdevice = VDevice()
         infer_model = vdevice.configure(hef, ConfigureParams.create_from_hef(hef))
@@ -195,6 +212,7 @@ class BirdClassifier:
         Returns:
             (species_name, confidence) or (None, 0.0) if below threshold.
         """
+        t0 = time.perf_counter()
         tensor = self._preprocess_crop(crop_bgr)
 
         if self.backend == "pytorch":
@@ -206,7 +224,18 @@ class BirdClassifier:
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
 
+        elapsed_ms = (time.perf_counter() - t0) * 1000
         species_name = self.class_names.get(class_idx, f"class_{class_idx}")
+
+        logger.debug(f"Classify: {species_name} ({confidence:.3f}) in {elapsed_ms:.1f}ms")
+        if elapsed_ms > SLOW_CLASSIFY_MS:
+            logger.warning(f"Slow classification: {elapsed_ms:.0f}ms (threshold={SLOW_CLASSIFY_MS}ms)")
+        if confidence < self.confidence_threshold:
+            logger.debug(
+                f"Classification below threshold: {species_name} "
+                f"({confidence:.3f} < {self.confidence_threshold})"
+            )
+
         return species_name, confidence
 
     def predict_top_k(self, crop_bgr: np.ndarray, k: int = 5) -> list[tuple[str, float]]:

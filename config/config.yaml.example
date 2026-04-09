@@ -1,0 +1,49 @@
+# Bird Feeder AI Configuration
+# This file is gitignored -- do not commit (contains camera credentials).
+
+# --- Logging ---
+log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# --- Camera ---
+camera:
+  rtsp_url: "rtsp://admin:password@192.168.1.100:554/11"
+  resolution: [1920, 1080]
+  inference_resolution: [640, 640]
+
+# --- Detection (YOLOv8n) ---
+detection:
+  confidence_threshold: 0.4
+  bird_class_id: 14  # COCO class 14 = "bird"
+
+# --- Classification (EfficientNet-B2 / MobileNetV2) ---
+classification:
+  confidence_threshold: 0.10
+
+# --- Wildlife Detection (nighttime) ---
+wildlife:
+  confidence_threshold: 0.4
+
+# --- Day/Night Mode ---
+day_night:
+  enabled: true
+  mode_check_interval: 60    # Seconds between sun time checks
+  night_offset_minutes: 30   # Start night mode this many minutes after sunset
+  day_offset_minutes: 30     # Start day mode this many minutes before sunrise
+
+# --- Pipeline ---
+pipeline:
+  process_every_n: 5  # Process every Nth frame (higher = less CPU)
+
+# --- Location (for sunrise/sunset calculation) ---
+location:
+  latitude: 33.1507    # Frisco, TX
+  longitude: -96.8236
+  timezone: "America/Chicago"
+
+# --- Storage ---
+storage:
+  save_crops: true
+  crop_quality: 85
+  thumbnail_size: [200, 200]
+  thumbnail_quality: 75
+  retention_days: 90  # Delete detection images older than this
