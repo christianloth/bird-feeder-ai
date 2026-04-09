@@ -27,9 +27,11 @@ from src.backend.database import (
 )
 from src.backend.storage import ImageStorage
 from src.inference.classifier import BirdClassifier
+from src.inference.detector import BirdDetector, WildlifeDetector
 from src.inference.tracker import BirdTracker, crop_bird_roi
 from src.pipeline.camera import RTSPCamera, FrameSkipper
-from src.inference.detector import BirdDetector
+from src.backend.weather import WeatherService
+from src.pipeline.mode_manager import DayNightManager
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +55,13 @@ class BirdPipeline:
         tracker: BirdTracker | None = None,
         storage: ImageStorage | None = None,
         process_every_n: int = 5,
+        wildlife_detector: WildlifeDetector | None = None,
+        mode_manager: DayNightManager | None = None,
     ):
         self.detector = detector
         self.classifier = classifier
+        self.wildlife_detector = wildlife_detector
+        self.mode_manager = mode_manager
         self.camera = camera
         self.tracker = tracker or BirdTracker()
         self.storage = storage or ImageStorage()
@@ -83,6 +89,8 @@ class BirdPipeline:
         species_name: str,
         confidence: float,
         timestamp: datetime,
+        detection_model: str = "yolov8n",
+        classifier_model: str = "mobilenetv2_nabirds",
     ):
         """Save a detection to storage and database."""
         # Save crop and thumbnail
@@ -105,8 +113,8 @@ class BirdPipeline:
                 timestamp=timestamp,
                 species_id=species.id if species else None,
                 confidence=confidence,
-                detection_model="yolov8n",
-                classifier_model="mobilenetv2_nabirds",
+                detection_model=detection_model,
+                classifier_model=classifier_model,
                 bbox_x1=float(x1),
                 bbox_y1=float(y1),
                 bbox_x2=float(x2),
@@ -124,6 +132,9 @@ class BirdPipeline:
         """
         Process a single frame through the full pipeline.
 
+        In DAY mode: detect birds (COCO YOLO) -> track -> classify species.
+        In NIGHT mode: detect wildlife (custom YOLO, 11 classes) -> track.
+
         Args:
             frame: BGR numpy array.
             timestamp: Frame timestamp (defaults to now).
@@ -132,6 +143,31 @@ class BirdPipeline:
             List of new detections as dicts with species, confidence, bbox.
         """
         timestamp = timestamp or time.time()
+
+        # Check for day/night mode transition
+        if self.mode_manager:
+            mode_changed = self.mode_manager.update()
+            if mode_changed:
+                self.tracker.reset()
+                logger.info(f"Tracker reset after mode switch to {self.mode_manager.mode.value}")
+
+        if self._is_night_mode:
+            return self._process_frame_night(frame, timestamp)
+        return self._process_frame_day(frame, timestamp)
+
+    @property
+    def _is_night_mode(self) -> bool:
+        """Check if we should use nighttime wildlife detection."""
+        return (
+            self.mode_manager is not None
+            and self.wildlife_detector is not None
+            and self.mode_manager.is_night
+        )
+
+    def _process_frame_day(
+        self, frame: np.ndarray, timestamp: float,
+    ) -> list[dict]:
+        """Daytime path: bird detection + species classification."""
         new_detections = []
 
         # 1. Detect birds
@@ -156,7 +192,59 @@ class BirdPipeline:
             # Save to storage and database
             dt = datetime.fromtimestamp(timestamp)
             if self._session_factory and settings.save_crops:
-                self._save_detection(frame, track.bbox, species_name, conf, dt)
+                self._save_detection(
+                    frame, track.bbox, species_name, conf, dt,
+                    detection_model="yolov8n",
+                    classifier_model="mobilenetv2_nabirds",
+                )
+
+            new_detections.append({
+                "species": species_name,
+                "confidence": conf,
+                "bbox": track.bbox,
+                "track_id": track.track_id,
+            })
+
+        return new_detections
+
+    def _process_frame_night(
+        self, frame: np.ndarray, timestamp: float,
+    ) -> list[dict]:
+        """Nighttime path: wildlife detection (class comes from YOLO directly)."""
+        new_detections = []
+
+        # 1. Detect wildlife -- returns class names directly
+        wildlife_dets = self.wildlife_detector.detect(frame)
+
+        bboxes = [d.bbox for d in wildlife_dets]
+
+        # 2. Update tracker
+        new_tracks = self.tracker.update(bboxes, timestamp)
+
+        # 3. Match new tracks to their wildlife detections
+        for track in new_tracks:
+            # Find the wildlife detection that matches this track's bbox
+            matched_det = None
+            for wd in wildlife_dets:
+                if wd.bbox == track.bbox:
+                    matched_det = wd
+                    break
+
+            if matched_det is None:
+                continue
+
+            species_name = matched_det.class_name
+            conf = matched_det.confidence
+
+            self.tracker.mark_classified(track.track_id, species_name, conf)
+
+            dt = datetime.fromtimestamp(timestamp)
+            if self._session_factory and settings.save_crops:
+                self._save_detection(
+                    frame, track.bbox, species_name, conf, dt,
+                    detection_model="yolo11n-wildlife",
+                    classifier_model="yolo11n-wildlife",
+                )
 
             new_detections.append({
                 "species": species_name,
@@ -190,6 +278,12 @@ class BirdPipeline:
         logger.info("Starting bird detection pipeline...")
         logger.info(f"  Detector: {self.detector.backend}")
         logger.info(f"  Classifier: {self.classifier.backend}")
+        if self.wildlife_detector:
+            logger.info(f"  Wildlife detector: {self.wildlife_detector.backend}")
+        if self.mode_manager:
+            logger.info("  Day/night mode: camera IR sync enabled")
+            self.mode_manager.check_now()
+            logger.info(f"  Initial mode: {self.mode_manager.mode.value}")
         logger.info(f"  Processing every {self.skipper.process_every_n} frames")
 
         self.camera.start()
@@ -250,16 +344,55 @@ class BirdPipeline:
         return self._running
 
 
+def _create_night_mode_components(
+    device: str | None = None,
+    backend: str = "ultralytics",
+) -> tuple[WildlifeDetector | None, DayNightManager | None]:
+    """
+    Create wildlife detector and day/night manager using sunrise/sunset times.
+
+    Returns (None, None) if sun times can't be fetched, so the pipeline
+    gracefully falls back to daytime-only mode.
+    """
+    weather = WeatherService()
+    sun_times = weather.get_daily_sun_times()
+
+    if sun_times is None:
+        logger.warning(
+            "Could not fetch sunrise/sunset times -- day/night mode switching "
+            "disabled. Pipeline will run in daytime-only mode."
+        )
+        weather.close()
+        return None, None
+
+    logger.info(
+        f"Sun times loaded: sunrise {sun_times['sunrise'].strftime('%H:%M')}, "
+        f"sunset {sun_times['sunset'].strftime('%H:%M')}"
+    )
+
+    if backend == "ultralytics":
+        wildlife_detector = WildlifeDetector.from_ultralytics(device=device)
+    else:
+        wildlife_detector = WildlifeDetector.from_hailo()
+
+    mode_manager = DayNightManager(weather)
+
+    return wildlife_detector, mode_manager
+
+
 def create_pipeline_dev(
     checkpoint_path: str | Path = "models/bird-classifier/efficientnet_b2/best_model.pth",
     class_names: dict[int, str] | None = None,
     rtsp_url: str | None = None,
     device: str | None = None,
+    enable_night_mode: bool = True,
 ) -> BirdPipeline:
     """
     Create a pipeline for local development (Mac/PC).
 
     Uses Ultralytics YOLO + PyTorch classifier on MPS/CUDA/CPU.
+    If enable_night_mode is True, also loads the wildlife detector and
+    sets up camera IR mode polling for automatic day/night switching.
     """
     detector = BirdDetector.from_ultralytics(device=device)
 
@@ -275,7 +408,20 @@ def create_pipeline_dev(
 
     camera = RTSPCamera(rtsp_url=rtsp_url) if rtsp_url else None
 
-    return BirdPipeline(detector=detector, classifier=classifier, camera=camera)
+    wildlife_detector = None
+    mode_manager = None
+    if enable_night_mode:
+        wildlife_detector, mode_manager = _create_night_mode_components(
+            device=device, backend="ultralytics",
+        )
+
+    return BirdPipeline(
+        detector=detector,
+        classifier=classifier,
+        camera=camera,
+        wildlife_detector=wildlife_detector,
+        mode_manager=mode_manager,
+    )
 
 
 def create_pipeline_hailo(
@@ -283,11 +429,14 @@ def create_pipeline_hailo(
     classifier_hef: str | Path | None = None,
     class_names: dict[int, str] | None = None,
     rtsp_url: str | None = None,
+    enable_night_mode: bool = True,
 ) -> BirdPipeline:
     """
     Create a pipeline for Raspberry Pi with Hailo NPU.
 
     Uses Hailo HEF models for both detection and classification.
+    If enable_night_mode is True, also loads the wildlife detector and
+    sets up camera IR mode polling for automatic day/night switching.
     """
     detector = BirdDetector.from_hailo(hef_path=detection_hef)
 
@@ -301,7 +450,20 @@ def create_pipeline_hailo(
 
     camera = RTSPCamera(rtsp_url=rtsp_url)
 
-    return BirdPipeline(detector=detector, classifier=classifier, camera=camera)
+    wildlife_detector = None
+    mode_manager = None
+    if enable_night_mode:
+        wildlife_detector, mode_manager = _create_night_mode_components(
+            backend="hailo",
+        )
+
+    return BirdPipeline(
+        detector=detector,
+        classifier=classifier,
+        camera=camera,
+        wildlife_detector=wildlife_detector,
+        mode_manager=mode_manager,
+    )
 
 
 def _load_class_names() -> dict[int, str]:
@@ -347,6 +509,10 @@ if __name__ == "__main__":
         "--device", type=str, default=None,
         help="Force device: 'mps', 'cuda', or 'cpu'",
     )
+    parser.add_argument(
+        "--no-night", action="store_true",
+        help="Disable night mode (wildlife detection) switching",
+    )
     args = parser.parse_args()
 
     if args.mode == "dev":
@@ -354,9 +520,13 @@ if __name__ == "__main__":
             checkpoint_path=args.checkpoint,
             rtsp_url=args.rtsp_url,
             device=args.device,
+            enable_night_mode=not args.no_night,
         )
     else:
-        pipeline = create_pipeline_hailo(rtsp_url=args.rtsp_url)
+        pipeline = create_pipeline_hailo(
+            rtsp_url=args.rtsp_url,
+            enable_night_mode=not args.no_night,
+        )
 
     if args.image:
         results = pipeline.run_on_image(args.image)

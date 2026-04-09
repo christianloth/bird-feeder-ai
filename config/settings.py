@@ -19,9 +19,6 @@ def _load_camera_config() -> dict:
         stream_path = cam.get("main_stream", "/11") if cam.get("stream") == "main" else cam.get("sub_stream", "/12")
         return {
             "rtsp_url": f"rtsp://{cam['username']}:{cam['password']}@{cam['ip']}:{cam.get('rtsp_port', 554)}{stream_path}",
-            "camera_ip": cam.get("ip", ""),
-            "camera_username": cam.get("username", ""),
-            "camera_password": cam.get("password", ""),
         }
     return {}
 
@@ -50,6 +47,21 @@ class Settings(BaseSettings):
     classifier_model_path: Path = models_dir / "hef" / "mobilenetv2_birds.hef"
     classification_confidence_threshold: float = 0.10
     num_species: int = 555  # NABirds dataset
+
+    # Wildlife detection (nighttime)
+    wildlife_model_path: Path = (
+        models_dir / "wildlife" / "yolo11n-wildlife-equal" / "weights" / "best.pt"
+    )
+    wildlife_confidence_threshold: float = 0.4
+    wildlife_class_names: dict[int, str] = {
+        0: "bird", 1: "bobcat", 2: "coyote", 3: "raccoon", 4: "rabbit",
+        5: "skunk", 6: "opossum", 7: "squirrel", 8: "armadillo", 9: "cat", 10: "dog",
+    }
+
+    # Day/night mode switching
+    mode_check_interval: int = 60  # Seconds between sun time checks
+    night_offset_minutes: int = 30  # Enter night mode this many minutes after sunset
+    day_offset_minutes: int = 30    # Enter day mode this many minutes before sunrise
 
     # Training
     batch_size: int = 32

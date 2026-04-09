@@ -167,6 +167,13 @@ class BirdTracker:
             self._tracks[track_id].species = species
             self._tracks[track_id].confidence = confidence
 
+    def reset(self) -> None:
+        """Clear all tracks. Used when switching between day/night modes."""
+        count = len(self._tracks)
+        self._tracks.clear()
+        if count:
+            logger.debug(f"Cleared {count} tracks")
+
     @property
     def active_tracks(self) -> list[BirdTrack]:
         """Get all currently active tracks."""
