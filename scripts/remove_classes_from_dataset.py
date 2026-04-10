@@ -126,7 +126,7 @@ def update_dataset_yaml(dry_run: bool) -> None:
 # Mix of daytime color and nighttime infrared images
 # Deer and fox removed due to insufficient training samples
 
-path: {DATASET_DIR}
+path: .  # resolved at runtime by train script
 train: images/train
 val: images/val
 
