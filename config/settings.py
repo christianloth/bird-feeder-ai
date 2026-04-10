@@ -49,18 +49,20 @@ class Settings:
     camera_resolution: tuple[int, int] = tuple(_camera.get("resolution", [1920, 1080]))
     inference_resolution: tuple[int, int] = tuple(_camera.get("inference_resolution", [640, 640]))
 
-    # Detection (YOLOv8n on Hailo)
-    detection_model_path: Path = field(default=None)
+    # Detection (daytime bird detection)
+    detection_model: str = _detection.get("model", "")
+    detection_model_path: Path = field(default=None)  # Hailo HEF path
     detection_confidence_threshold: float = _detection.get("confidence_threshold", 0.4)
     bird_class_id: int = _detection.get("bird_class_id", 14)
 
-    # Classification (fine-tuned)
-    classifier_model_path: Path = field(default=None)
+    # Classification (fine-tuned species classifier)
+    classifier_model_path: Path = field(default=None)  # Hailo HEF path
     classification_confidence_threshold: float = _classification.get("confidence_threshold", 0.10)
     num_species: int = 555  # NABirds dataset
 
     # Wildlife detection (nighttime)
-    wildlife_model_path: Path = field(default=None)
+    wildlife_model: str = _wildlife.get("model", "")
+    wildlife_model_path: Path = field(default=None)  # Hailo HEF path
     wildlife_confidence_threshold: float = _wildlife.get("confidence_threshold", 0.4)
     wildlife_class_names: dict[int, str] = field(default_factory=lambda: {
         0: "bird", 1: "bobcat", 2: "coyote", 3: "raccoon", 4: "rabbit",

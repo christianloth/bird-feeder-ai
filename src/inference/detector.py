@@ -63,7 +63,13 @@ class BirdDetector:
         from ultralytics import YOLO
         from config.settings import get_device
 
-        model_path = model_path or "yolov8n.pt"
+        model_path = model_path or settings.detection_model
+        if not model_path:
+            raise ValueError(
+                "No detection model configured. Set detection.model in config/config.yaml"
+            )
+        if not Path(model_path).exists():
+            raise FileNotFoundError(f"Detection model not found: {model_path}")
         device = get_device(device)
         logger.debug(f"Loading YOLO detector from {model_path}")
         model = YOLO(str(model_path))
@@ -254,7 +260,11 @@ class WildlifeDetector:
         from ultralytics import YOLO
         from config.settings import get_device
 
-        model_path = model_path or settings.wildlife_model_path
+        model_path = model_path or settings.wildlife_model
+        if not model_path:
+            raise ValueError(
+                "No wildlife model configured. Set wildlife.model in config/config.yaml"
+            )
         if not Path(model_path).exists():
             logger.critical(f"Wildlife model not found: {model_path}")
             raise FileNotFoundError(f"Wildlife model not found: {model_path}")

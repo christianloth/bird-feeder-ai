@@ -10,8 +10,10 @@ camera:
   resolution: [1920, 1080]
   inference_resolution: [640, 640]
 
-# --- Detection (YOLOv8n) ---
+# --- Detection (daytime bird detection) ---
+# model: COCO YOLO for bird detection (class 14). REQUIRED.
 detection:
+  model: "models/base-models/yolo11n.pt"
   confidence_threshold: 0.4
   bird_class_id: 14  # COCO class 14 = "bird"
 
@@ -20,7 +22,9 @@ classification:
   confidence_threshold: 0.10
 
 # --- Wildlife Detection (nighttime) ---
+# model: Custom trained wildlife YOLO model. REQUIRED.
 wildlife:
+  model: "models/wildlife/yolo11s-wildlife-equal/weights/best.pt"
   confidence_threshold: 0.4
 
 # --- Day/Night Mode ---
