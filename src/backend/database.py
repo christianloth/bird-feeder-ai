@@ -23,6 +23,8 @@ from sqlalchemy import (
     Index,
     create_engine,
     event,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -48,6 +50,7 @@ class Species(Base):
     scientific_name: Mapped[str] = mapped_column(String(200), nullable=False)
     family: Mapped[str | None] = mapped_column(String(200))
     class_index: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(20), default="bird", server_default="bird")
 
     detections: Mapped[list["Detection"]] = relationship(
         back_populates="species", foreign_keys="[Detection.species_id]",
@@ -70,9 +73,6 @@ class Detection(Base):
     bbox_y1: Mapped[float | None] = mapped_column(Float)
     bbox_x2: Mapped[float | None] = mapped_column(Float)
     bbox_y2: Mapped[float | None] = mapped_column(Float)
-    image_path: Mapped[str | None] = mapped_column(String(500))
-    thumbnail_path: Mapped[str | None] = mapped_column(String(500))
-    clean_crop_path: Mapped[str | None] = mapped_column(String(500))
     frame_path: Mapped[str | None] = mapped_column(String(500))
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_false_positive: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -165,7 +165,7 @@ def load_species_from_dataset(session: Session, classes_file: Path) -> None:
         session: Active database session
         classes_file: Path to NABirds classes.txt (format: "class_id species_name")
     """
-    existing = session.query(Species).count()
+    existing = session.query(Species).filter(Species.category == "bird").count()
     if existing > 0:
         return
 
@@ -178,7 +178,54 @@ def load_species_from_dataset(session: Session, classes_file: Path) -> None:
                     common_name=name,
                     scientific_name=name,
                     class_index=idx,
+                    category="bird",
                 )
                 session.add(species)
 
     session.commit()
+
+
+# Wildlife species for night-mode detection. class_index starts at 2000
+# to stay clear of NABirds range (0-1010).
+WILDLIFE_SPECIES = [
+    {"common_name": "bird", "scientific_name": "N/A", "family": "Wildlife", "class_index": 2000},
+    {"common_name": "bobcat", "scientific_name": "Lynx rufus", "family": "Wildlife", "class_index": 2001},
+    {"common_name": "coyote", "scientific_name": "Canis latrans", "family": "Wildlife", "class_index": 2002},
+    {"common_name": "raccoon", "scientific_name": "Procyon lotor", "family": "Wildlife", "class_index": 2003},
+    {"common_name": "rabbit", "scientific_name": "Sylvilagus floridanus", "family": "Wildlife", "class_index": 2004},
+    {"common_name": "skunk", "scientific_name": "Mephitis mephitis", "family": "Wildlife", "class_index": 2005},
+    {"common_name": "opossum", "scientific_name": "Didelphis virginiana", "family": "Wildlife", "class_index": 2006},
+    {"common_name": "squirrel", "scientific_name": "Sciurus carolinensis", "family": "Wildlife", "class_index": 2007},
+    {"common_name": "armadillo", "scientific_name": "Dasypus novemcinctus", "family": "Wildlife", "class_index": 2008},
+    {"common_name": "cat", "scientific_name": "Felis catus", "family": "Wildlife", "class_index": 2009},
+    {"common_name": "dog", "scientific_name": "Canis lupus familiaris", "family": "Wildlife", "class_index": 2010},
+]
+
+
+def load_wildlife_species(session: Session) -> None:
+    """Load wildlife species into the database for night-mode detection."""
+    existing = session.query(Species).filter(Species.category == "wildlife").count()
+    if existing > 0:
+        return
+
+    for ws in WILDLIFE_SPECIES:
+        species = Species(
+            common_name=ws["common_name"],
+            scientific_name=ws["scientific_name"],
+            family=ws["family"],
+            class_index=ws["class_index"],
+            category="wildlife",
+        )
+        session.add(species)
+
+    session.commit()
+
+
+def migrate_species_category(engine) -> None:
+    """Add category column to species table if it doesn't exist (for existing DBs)."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("species")]
+    if "category" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE species ADD COLUMN category VARCHAR(20) DEFAULT 'bird'"))
+

@@ -126,27 +126,25 @@ def export_classification(
         if label is None:
             continue
 
-        # Use clean crop (no bounding box annotations)
-        crop_rel = det.clean_crop_path
-        if not crop_rel:
-            # Fall back for old detections that don't have clean crops
-            crop_rel = det.image_path
-            if not crop_rel:
-                skipped_missing += 1
-                continue
-            logger.debug(
-                f"Detection {det.id} has no clean crop, "
-                "falling back to annotated crop"
-            )
-
-        crop_path = storage.get_absolute_path(crop_rel)
-        if not crop_path.exists():
+        # Crop from the saved frame using bbox coordinates
+        frame_rel = det.frame_path
+        if not frame_rel:
             skipped_missing += 1
-            logger.debug(f"Image not found: {crop_path}")
             continue
 
-        # Deduplicate by perceptual hash
-        phash = perceptual_hash(crop_path)
+        frame_path = storage.get_absolute_path(frame_rel)
+        if not frame_path.exists():
+            skipped_missing += 1
+            logger.debug(f"Frame not found: {frame_path}")
+            continue
+
+        if not all(v is not None for v in [det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2]):
+            skipped_missing += 1
+            logger.debug(f"Detection {det.id} missing bbox coordinates")
+            continue
+
+        # Deduplicate by perceptual hash of the frame
+        phash = perceptual_hash(frame_path)
         species_hashes = hashes_by_species.setdefault(label, [])
         is_duplicate = any(
             hamming_distance(phash, existing) < dedup_threshold
@@ -154,17 +152,22 @@ def export_classification(
         )
         if is_duplicate:
             skipped_dedup += 1
-            logger.debug(f"Skipping near-duplicate for {label}: {crop_rel}")
+            logger.debug(f"Skipping near-duplicate for {label}: {frame_rel}")
             continue
         species_hashes.append(phash)
 
-        # Copy to species directory
+        # Crop the detection region from the frame
+        crop = ImageStorage.crop_from_frame(
+            frame_path, (det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2),
+        )
+
+        # Save to species directory
         safe_name = label.lower().replace(" ", "_").replace("'", "")
         species_dir = output_dir / safe_name
         species_dir.mkdir(parents=True, exist_ok=True)
 
-        dest = species_dir / crop_path.name
-        shutil.copy2(crop_path, dest)
+        dest = species_dir / frame_path.name
+        crop.save(dest, "JPEG", quality=85, optimize=True)
         exported += 1
 
     logger.info(

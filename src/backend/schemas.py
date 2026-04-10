@@ -29,8 +29,7 @@ class DetectionCreate(BaseModel):
     bbox_y1: float | None = None
     bbox_x2: float | None = None
     bbox_y2: float | None = None
-    image_path: str | None = None
-    thumbnail_path: str | None = None
+    frame_path: str | None = None
 
 
 class DetectionResponse(BaseModel):
@@ -45,9 +44,6 @@ class DetectionResponse(BaseModel):
     bbox_y1: float | None = None
     bbox_x2: float | None = None
     bbox_y2: float | None = None
-    image_path: str | None = None
-    thumbnail_path: str | None = None
-    clean_crop_path: str | None = None
     frame_path: str | None = None
     reviewed: bool = False
     is_false_positive: bool = False

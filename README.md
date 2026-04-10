@@ -176,16 +176,15 @@ Uses pre-compiled HEF models on the Hailo NPU. Model paths are configurable in `
 
 ### What gets saved per detection
 
-Each detection writes 4 image files and a database row:
+Each detection saves one full frame image and a database row:
 
-| File | Purpose |
-|---|---|
-| `{name}.jpg` | Annotated crop with red bounding box (for visual review) |
-| `{name}_thumb.jpg` | Thumbnail of annotated crop |
-| `{name}_clean.jpg` | Clean crop without annotations (for classifier retraining) |
-| `{name}_frame.jpg` | Full original frame (for YOLO retraining) |
+| Saved | Where | Purpose |
+|---|---|---|
+| Full frame | `detections/YYYY/MM/DD/{name}.jpg` | Source of truth image |
+| Bbox coordinates | SQLite `detections` table | `bbox_x1, y1, x2, y2` pixel values |
+| Metadata | SQLite `detections` table | Species, confidence, model, timestamp, source |
 
-Images are saved to `detections/YYYY/MM/DD/`. Bounding box coordinates are stored in the database as absolute pixel values.
+Crops, thumbnails, and annotated views are generated on-the-fly from the frame + bbox coordinates (no redundant image files).
 
 ### Logging levels
 

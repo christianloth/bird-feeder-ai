@@ -24,6 +24,8 @@ from src.backend.database import (
     Detection,
     Species,
     load_species_from_dataset,
+    load_wildlife_species,
+    migrate_species_category,
 )
 from src.backend.storage import ImageStorage
 from src.inference.classifier import BirdClassifier
@@ -78,6 +80,7 @@ class BirdPipeline:
         """Initialize database tables and species lookup."""
         logger.debug("Initializing database connection")
         engine = create_tables()
+        migrate_species_category(engine)
         self._session_factory = get_session_factory(engine)
 
         # Load species from NABirds if not already in DB
@@ -88,6 +91,11 @@ class BirdPipeline:
             logger.debug("Species lookup table loaded")
         else:
             logger.warning(f"NABirds classes file not found at {classes_file}")
+
+        # Load wildlife species for night-mode detection
+        with self._session_factory() as session:
+            load_wildlife_species(session)
+        logger.debug("Wildlife species lookup table loaded")
 
     def _save_detection(
         self,
@@ -136,9 +144,6 @@ class BirdPipeline:
                     bbox_y1=float(y1),
                     bbox_x2=float(x2),
                     bbox_y2=float(y2),
-                    image_path=paths["image_path"],
-                    thumbnail_path=paths["thumbnail_path"],
-                    clean_crop_path=paths["clean_crop_path"],
                     frame_path=paths["frame_path"],
                     source=source,
                 )

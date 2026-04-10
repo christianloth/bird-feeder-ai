@@ -21,6 +21,8 @@ from src.backend.database import (
     get_engine,
     create_tables,
     get_session_factory,
+    load_wildlife_species,
+    migrate_species_category,
 )
 from src.backend.schemas import (
     DetectionResponse,
@@ -51,7 +53,12 @@ async def lifespan(app: FastAPI):
 
     _engine = get_engine()
     create_tables(_engine)
+    migrate_species_category(_engine)
     _session_factory = get_session_factory(_engine)
+
+    with _session_factory() as session:
+        load_wildlife_species(session)
+
     _weather_service = WeatherService()
     _image_storage = ImageStorage()
     _start_time = datetime.now()
