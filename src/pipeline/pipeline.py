@@ -405,7 +405,15 @@ class BirdPipeline:
 
         # Use min_frames=1 so detections are immediate
         self.tracker = BirdTracker(min_frames_for_detection=1)
-        return self.process_frame(frame)
+        logger.info(f"Processing image: {image_path}")
+        detections = self.process_frame(frame)
+        for det in detections:
+            logger.info(
+                f"  {det['species']} ({det['confidence']:.2f}) track={det['track_id']}"
+            )
+        if not detections:
+            logger.info("  No detections")
+        return detections
 
     def run_on_video(
         self,
