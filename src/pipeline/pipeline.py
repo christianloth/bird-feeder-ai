@@ -225,8 +225,8 @@ class BirdPipeline:
             if self.save_enabled and self._session_factory and settings.save_crops:
                 self._save_detection(
                     frame, track.bbox, species_name, conf, dt,
-                    detection_model="yolov8n",
-                    classifier_model="mobilenetv2_nabirds",
+                    detection_model=Path(settings.detection_model).stem,
+                    classifier_model="efficientnet_b2_nabirds",
                     source=self._source,
                 )
 
@@ -277,8 +277,8 @@ class BirdPipeline:
             if self.save_enabled and self._session_factory and settings.save_crops:
                 self._save_detection(
                     frame, track.bbox, species_name, conf, dt,
-                    detection_model="yolo11n-wildlife",
-                    classifier_model="yolo11n-wildlife",
+                    detection_model=Path(settings.wildlife_model).parent.parent.name,
+                    classifier_model=Path(settings.wildlife_model).parent.parent.name,
                     source=self._source,
                 )
 

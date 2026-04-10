@@ -1,7 +1,7 @@
 """
 Object detection using YOLO models.
 
-BirdDetector: YOLOv8n detecting birds (COCO class 14) in camera frames.
+BirdDetector: YOLO detecting birds (COCO class 14) in camera frames.
 WildlifeDetector: Custom YOLO detecting 11 wildlife classes for nighttime.
 
 Both support:
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class BirdDetector:
     """
-    Detects birds in camera frames using YOLOv8n.
+    Detects birds in camera frames using YOLO (model set in config.yaml).
 
     Filters detections to only COCO class 14 (bird) and applies
     a confidence threshold.
@@ -55,10 +55,10 @@ class BirdDetector:
         confidence_threshold: float | None = None,
     ) -> "BirdDetector":
         """
-        Load YOLOv8n using the Ultralytics library.
+        Load a YOLO model using the Ultralytics library.
 
         Works on MPS (Mac), CUDA (NVIDIA), or CPU.
-        If model_path is not provided, downloads yolov8n.pt automatically.
+        If model_path is not provided, uses detection.model from config.yaml.
         """
         from ultralytics import YOLO
         from config.settings import get_device
@@ -88,7 +88,7 @@ class BirdDetector:
         hef_path: str | Path | None = None,
         confidence_threshold: float | None = None,
     ) -> "BirdDetector":
-        """Load YOLOv8n HEF model for Hailo NPU inference."""
+        """Load YOLO HEF model for Hailo NPU inference."""
         from hailo_platform import HEF, VDevice, ConfigureParams
 
         hef_path = hef_path or settings.detection_model_path
