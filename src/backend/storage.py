@@ -38,7 +38,7 @@ class ImageStorage:
     ) -> str:
         """Build a descriptive filename like '20250315_143022_northern_cardinal_0.87'."""
         time_str = timestamp.strftime("%Y%m%d_%H%M%S")
-        safe_name = species_name.lower().replace(" ", "_").replace("'", "")
+        safe_name = species_name.lower().replace(" ", "_").replace("'", "").replace("/", "-")
         return f"{time_str}_{safe_name}_{confidence:.2f}"
 
     def save_detection(

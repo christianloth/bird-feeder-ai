@@ -57,6 +57,7 @@ class BirdPipeline:
         process_every_n: int = 5,
         wildlife_detector: WildlifeDetector | None = None,
         mode_manager: DayNightManager | None = None,
+        save_enabled: bool = True,
     ):
         self.detector = detector
         self.classifier = classifier
@@ -66,6 +67,8 @@ class BirdPipeline:
         self.tracker = tracker or BirdTracker()
         self.storage = storage or ImageStorage()
         self.skipper = FrameSkipper(process_every_n=process_every_n)
+        self.save_enabled = save_enabled
+        self._source = "rtsp"  # Updated by run_on_image/run_on_video
 
         self._running = False
         self._total_detections = 0
@@ -95,6 +98,7 @@ class BirdPipeline:
         timestamp: datetime,
         detection_model: str = "yolov8n",
         classifier_model: str = "mobilenetv2_nabirds",
+        source: str = "rtsp",
     ):
         """Save a detection to storage and database."""
         try:
@@ -136,6 +140,7 @@ class BirdPipeline:
                     thumbnail_path=paths["thumbnail_path"],
                     clean_crop_path=paths["clean_crop_path"],
                     frame_path=paths["frame_path"],
+                    source=source,
                 )
                 session.add(detection)
                 session.commit()
@@ -217,11 +222,12 @@ class BirdPipeline:
             self.tracker.mark_classified(track.track_id, species_name, conf)
 
             dt = datetime.fromtimestamp(timestamp)
-            if self._session_factory and settings.save_crops:
+            if self.save_enabled and self._session_factory and settings.save_crops:
                 self._save_detection(
                     frame, track.bbox, species_name, conf, dt,
                     detection_model="yolov8n",
                     classifier_model="mobilenetv2_nabirds",
+                    source=self._source,
                 )
 
             new_detections.append({
@@ -268,11 +274,12 @@ class BirdPipeline:
             self.tracker.mark_classified(track.track_id, species_name, conf)
 
             dt = datetime.fromtimestamp(timestamp)
-            if self._session_factory and settings.save_crops:
+            if self.save_enabled and self._session_factory and settings.save_crops:
                 self._save_detection(
                     frame, track.bbox, species_name, conf, dt,
                     detection_model="yolo11n-wildlife",
                     classifier_model="yolo11n-wildlife",
+                    source=self._source,
                 )
 
             new_detections.append({
@@ -294,7 +301,8 @@ class BirdPipeline:
             logger.critical("No camera configured. Cannot start pipeline.")
             raise RuntimeError("No camera configured. Use run_on_image() for single images.")
 
-        self._init_database()
+        if self.save_enabled:
+            self._init_database()
         self._running = True
 
         # Graceful shutdown on Ctrl+C
@@ -306,6 +314,7 @@ class BirdPipeline:
         signal.signal(signal.SIGTERM, signal_handler)
 
         logger.info("Starting bird detection pipeline...")
+        logger.info(f"  Storage: {'enabled' if self.save_enabled else 'DISABLED (--no-save)'}")
         logger.info(f"  Detector: {self.detector.backend}")
         logger.info(f"  Classifier: {self.classifier.backend}")
         if self.wildlife_detector:
@@ -390,11 +399,105 @@ class BirdPipeline:
         if frame is None:
             raise FileNotFoundError(f"Could not load image: {image_path}")
 
-        self._init_database()
+        self._source = "image"
+        if self.save_enabled:
+            self._init_database()
 
         # Use min_frames=1 so detections are immediate
         self.tracker = BirdTracker(min_frames_for_detection=1)
         return self.process_frame(frame)
+
+    def run_on_video(
+        self,
+        video_path: str | Path,
+        process_every_n: int | None = None,
+    ) -> list[dict]:
+        """
+        Run the pipeline on a video file.
+
+        Processes frames through the full pipeline (detect → track → classify)
+        and saves detections to the database and detections/ folder, just like
+        live RTSP mode.
+
+        Args:
+            video_path: Path to a video file (mp4, avi, etc.).
+            process_every_n: Process every Nth frame. If None, uses the
+                pipeline's configured FrameSkipper value.
+
+        Returns:
+            List of all detections across the video.
+        """
+        import cv2
+
+        video_path = Path(video_path)
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video not found: {video_path}")
+
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video: {video_path}")
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        duration = total_frames / fps
+
+        self._source = "video"
+        logger.info(f"Processing video: {video_path.name}")
+        logger.info(f"  Resolution: {width}x{height}, FPS: {fps:.0f}, "
+                     f"Duration: {duration:.1f}s, Frames: {total_frames}")
+
+        if self.save_enabled:
+            self._init_database()
+        self.tracker = BirdTracker(min_frames_for_detection=1)
+
+        skip = process_every_n or self.skipper.process_every_n
+        all_detections = []
+        frame_num = 0
+        frames_processed = 0
+        t_start = time.time()
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_num % skip != 0:
+                frame_num += 1
+                continue
+
+            timestamp = frame_num / fps
+
+            try:
+                detections = self.process_frame(frame, timestamp)
+            except Exception as e:
+                logger.error(f"Frame {frame_num} failed: {e}")
+                frame_num += 1
+                continue
+
+            for det in detections:
+                det["frame_num"] = frame_num
+                det["video_time"] = f"{timestamp:.1f}s"
+                all_detections.append(det)
+                logger.info(
+                    f"  [{timestamp:.1f}s] {det['species']} "
+                    f"({det['confidence']:.2f}) track={det['track_id']}"
+                )
+
+            frames_processed += 1
+            frame_num += 1
+
+        cap.release()
+        elapsed = time.time() - t_start
+
+        logger.info(
+            f"Video complete: {frames_processed} frames processed in {elapsed:.1f}s "
+            f"({frames_processed / max(elapsed, 0.01):.1f} fps), "
+            f"{len(all_detections)} detections"
+        )
+
+        return all_detections
 
     @property
     def total_detections(self) -> int:
@@ -447,6 +550,7 @@ def create_pipeline_dev(
     rtsp_url: str | None = None,
     device: str | None = None,
     enable_night_mode: bool = True,
+    save_enabled: bool = True,
 ) -> BirdPipeline:
     """
     Create a pipeline for local development (Mac/PC).
@@ -482,6 +586,7 @@ def create_pipeline_dev(
         camera=camera,
         wildlife_detector=wildlife_detector,
         mode_manager=mode_manager,
+        save_enabled=save_enabled,
     )
 
 
@@ -491,6 +596,7 @@ def create_pipeline_hailo(
     class_names: dict[int, str] | None = None,
     rtsp_url: str | None = None,
     enable_night_mode: bool = True,
+    save_enabled: bool = True,
 ) -> BirdPipeline:
     """
     Create a pipeline for Raspberry Pi with Hailo NPU.
@@ -524,6 +630,7 @@ def create_pipeline_hailo(
         camera=camera,
         wildlife_detector=wildlife_detector,
         mode_manager=mode_manager,
+        save_enabled=save_enabled,
     )
 
 
@@ -554,6 +661,14 @@ if __name__ == "__main__":
         help="Run on a single image instead of live camera",
     )
     parser.add_argument(
+        "--video", type=str, default=None,
+        help="Run on a video file instead of live camera",
+    )
+    parser.add_argument(
+        "--process-every-n", type=int, default=None,
+        help="Process every Nth frame in video mode (default: from config)",
+    )
+    parser.add_argument(
         "--checkpoint", type=str, default="models/bird-classifier/efficientnet_b2/best_model.pth",
         help="Path to trained model checkpoint (dev mode)",
     )
@@ -568,6 +683,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-night", action="store_true",
         help="Disable night mode (wildlife detection) switching",
+    )
+    parser.add_argument(
+        "--no-save", action="store_true",
+        help="Disable saving detections to database and disk (log only)",
     )
     parser.add_argument(
         "--log-level",
@@ -590,11 +709,13 @@ if __name__ == "__main__":
             rtsp_url=args.rtsp_url,
             device=args.device,
             enable_night_mode=not args.no_night,
+            save_enabled=not args.no_save,
         )
     else:
         pipeline = create_pipeline_hailo(
             rtsp_url=args.rtsp_url,
             enable_night_mode=not args.no_night,
+            save_enabled=not args.no_save,
         )
 
     if args.image:
@@ -604,5 +725,17 @@ if __name__ == "__main__":
                 print(f"{r['species']} ({r['confidence']:.2f}) at {r['bbox']}")
         else:
             print("No birds detected.")
+    elif args.video:
+        results = pipeline.run_on_video(
+            args.video, process_every_n=args.process_every_n,
+        )
+        if results:
+            print(f"\n{'='*60}")
+            print(f"Video inference complete: {len(results)} detections")
+            print(f"{'='*60}")
+            for r in results:
+                print(f"  [{r['video_time']}] {r['species']} ({r['confidence']:.2f})")
+        else:
+            print("No detections in video.")
     else:
         pipeline.run()

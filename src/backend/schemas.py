@@ -53,6 +53,7 @@ class DetectionResponse(BaseModel):
     is_false_positive: bool = False
     corrected_species_id: int | None = None
     corrected_species_name: str | None = None
+    source: str | None = None
 
     model_config = {"from_attributes": True}
 

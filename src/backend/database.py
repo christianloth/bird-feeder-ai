@@ -77,6 +77,7 @@ class Detection(Base):
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_false_positive: Mapped[bool] = mapped_column(Boolean, default=False)
     corrected_species_id: Mapped[int | None] = mapped_column(ForeignKey("species.id"))
+    source: Mapped[str | None] = mapped_column(String(20), default="rtsp")
 
     species: Mapped[Species | None] = relationship(
         back_populates="detections", foreign_keys=[species_id],

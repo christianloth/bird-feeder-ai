@@ -32,19 +32,19 @@ That's it. The pipeline connects to your camera, detects birds (day) or wildlife
 
 ```
                           DAYTIME                                    NIGHTTIME
-Camera (RTSP) --> YOLOv8n (COCO bird) --> Tracker --> EfficientNet-B2 --> DB
-                  "Is there a bird?"       Dedup      "What species?"     SQLite
+Camera (RTSP) --> YOLO11n (COCO bird) --> Tracker --> EfficientNet-B2 --> DB
+  or video file   "Is there a bird?"       Dedup      "What species?"     SQLite
                                                        555 NABirds        + images
 
-Camera (RTSP) --> YOLO11n (wildlife) ---> Tracker ----------------------> DB
-                  "What animal?"           Dedup    class from detector   SQLite
+Camera (RTSP) --> YOLO11s (wildlife) ---> Tracker ----------------------> DB
+  or video file   "What animal?"           Dedup    class from detector   SQLite
                   11 classes                                              + images
 ```
 
 The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night mode activates 30 minutes after sunset and deactivates 30 minutes before sunrise. Both offsets are configurable.
 
 **Daytime pipeline (bird species):**
-1. **Detection** -- YOLOv8n finds birds (COCO class 14) and outputs bounding boxes
+1. **Detection** -- YOLO11n finds birds (COCO class 14) and outputs bounding boxes
 2. **Tracking** -- Centroid-based tracker deduplicates so a bird sitting for 30 seconds is logged once
 3. **Classification** -- Cropped bird region is classified by EfficientNet-B2 (555 NABirds species)
 4. **Storage** -- Detection saved to SQLite with species, confidence, bbox, annotated crop, clean crop (no bbox), thumbnail, and full frame
@@ -119,11 +119,14 @@ The RTSP URL comes from `config/config.yaml`. The pipeline runs continuously unt
 |---|---|---|
 | `--mode {dev,hailo}` | `dev` | `dev` for Mac/PC, `hailo` for Raspberry Pi |
 | `--image PATH` | None | Process a single image instead of live camera |
+| `--video PATH` | None | Process a video file instead of live camera |
+| `--process-every-n N` | From config | Process every Nth frame in video mode |
 | `--checkpoint PATH` | `models/bird-classifier/efficientnet_b2/best_model.pth` | Path to classifier checkpoint |
 | `--rtsp-url URL` | From config | RTSP camera URL (overrides config) |
-| `--device {mps,cuda,cpu}` | Auto-detected | Force compute device |
+| `--device {cuda,mps,cpu}` | Auto (CUDA → MPS → CPU) | Force compute device |
 | `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` | From config | Logging verbosity |
 | `--no-night` | Off | Disable night mode (daytime bird detection only) |
+| `--no-save` | Off | Disable saving to database and disk (log only) |
 
 ### Examples
 
@@ -133,16 +136,22 @@ Test on a single image:
 python -m src.pipeline.pipeline --mode dev --image path/to/bird.jpg
 ```
 
+Run inference on a video file (saves detections to database + `detections/` folder):
+
+```bash
+python -m src.pipeline.pipeline --video path/to/video.mp4
+```
+
+Process every 12th frame of a video (faster, skips redundant frames):
+
+```bash
+python -m src.pipeline.pipeline --video clip.mp4 --process-every-n 12
+```
+
 Run with verbose logging (see per-frame inference timing, tracker details):
 
 ```bash
 python -m src.pipeline.pipeline --mode dev --log-level DEBUG
-```
-
-Run with only warnings and errors (quiet mode):
-
-```bash
-python -m src.pipeline.pipeline --mode dev --log-level WARNING
 ```
 
 Disable night mode (bird detection only, no wildlife switching):
