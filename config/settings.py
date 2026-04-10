@@ -46,8 +46,6 @@ class Settings:
 
     # Camera
     rtsp_url: str = _camera.get("rtsp_url", "rtsp://admin:password@192.168.1.100:554/11")
-    camera_resolution: tuple[int, int] = tuple(_camera.get("resolution", [1920, 1080]))
-    inference_resolution: tuple[int, int] = tuple(_camera.get("inference_resolution", [640, 640]))
 
     # Detection (daytime bird detection)
     detection_model: str = _detection.get("model", "")
@@ -70,20 +68,12 @@ class Settings:
     })
 
     # Day/night mode switching
-    enable_night_mode: bool = _day_night.get("enabled", True)
     mode_check_interval: int = _day_night.get("mode_check_interval", 60)
     night_offset_minutes: int = _day_night.get("night_offset_minutes", 30)
     day_offset_minutes: int = _day_night.get("day_offset_minutes", 30)
 
     # Pipeline
     process_every_n: int = _pipeline.get("process_every_n", 5)
-
-    # Training
-    batch_size: int = 32
-    learning_rate: float = 0.001
-    num_epochs: int = 25
-    num_workers: int = 4
-    train_val_split: float = 0.8
 
     # Database
     database_url: str = f"sqlite:///{_PROJECT_ROOT / 'data' / 'birds.db'}"

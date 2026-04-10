@@ -7,8 +7,6 @@ log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 # --- Camera ---
 camera:
   rtsp_url: "rtsp://admin:password@192.168.1.100:554/11"
-  resolution: [1920, 1080]
-  inference_resolution: [640, 640]
 
 # --- Detection (daytime bird detection) ---
 # model: COCO YOLO for bird detection (class 14). REQUIRED.
@@ -29,7 +27,6 @@ wildlife:
 
 # --- Day/Night Mode ---
 day_night:
-  enabled: true
   mode_check_interval: 60    # Seconds between sun time checks
   night_offset_minutes: 30   # Start night mode this many minutes after sunset
   day_offset_minutes: 30     # Start day mode this many minutes before sunrise
