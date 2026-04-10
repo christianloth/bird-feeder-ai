@@ -72,15 +72,9 @@ class BirdClassifier:
 
         model_config = get_model_config(model_name)
 
-        if device is None:
-            if torch.cuda.is_available():
-                dev = torch.device("cuda")
-            elif torch.backends.mps.is_available():
-                dev = torch.device("mps")
-            else:
-                dev = torch.device("cpu")
-        else:
-            dev = torch.device(device)
+        from config.settings import get_device
+
+        dev = torch.device(get_device(device))
 
         logger.debug(f"Loading {model_name} classifier from {checkpoint_path}")
         model = create_model(

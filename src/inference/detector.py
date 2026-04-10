@@ -61,15 +61,15 @@ class BirdDetector:
         If model_path is not provided, downloads yolov8n.pt automatically.
         """
         from ultralytics import YOLO
+        from config.settings import get_device
 
         model_path = model_path or "yolov8n.pt"
+        device = get_device(device)
         logger.debug(f"Loading YOLO detector from {model_path}")
         model = YOLO(str(model_path))
+        model.to(device)
 
-        if device:
-            model.to(device)
-
-        logger.info(f"Loaded YOLO detector from {model_path} (device={device or 'auto'})")
+        logger.info(f"Loaded YOLO detector from {model_path} (device={device})")
         return cls(
             backend="ultralytics",
             model=model,
@@ -252,19 +252,19 @@ class WildlifeDetector:
         (models/wildlife/yolo11n-wildlife-equal/weights/best.pt).
         """
         from ultralytics import YOLO
+        from config.settings import get_device
 
         model_path = model_path or settings.wildlife_model_path
         if not Path(model_path).exists():
             logger.critical(f"Wildlife model not found: {model_path}")
             raise FileNotFoundError(f"Wildlife model not found: {model_path}")
 
+        device = get_device(device)
         logger.debug(f"Loading wildlife detector from {model_path}")
         model = YOLO(str(model_path))
+        model.to(device)
 
-        if device:
-            model.to(device)
-
-        logger.info(f"Loaded wildlife detector from {model_path} (device={device or 'auto'})")
+        logger.info(f"Loaded wildlife detector from {model_path} (device={device})")
         return cls(
             backend="ultralytics",
             model=model,

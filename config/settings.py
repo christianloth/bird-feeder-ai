@@ -118,3 +118,25 @@ class Settings:
 
 
 settings = Settings()
+
+
+def get_device(override: str | None = None) -> str:
+    """Select the best available device: CUDA → MPS → CPU.
+
+    Args:
+        override: Force a specific device (e.g., "cuda", "mps", "cpu").
+                  If None, auto-detects the best available.
+
+    Returns:
+        Device string suitable for both PyTorch and Ultralytics.
+    """
+    if override:
+        return override
+
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"

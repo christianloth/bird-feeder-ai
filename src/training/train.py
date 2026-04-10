@@ -355,11 +355,8 @@ def train(
     """
     # 1. Device setup (cuda > mps > cpu)
     if device is None:
-        device = torch.device(
-            "cuda" if torch.cuda.is_available()
-            else "mps" if torch.backends.mps.is_available()
-            else "cpu"
-        )
+        from config.settings import get_device
+        device = torch.device(get_device())
     print(f"Using device: {device}")
 
     # 2. Move model to device

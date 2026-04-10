@@ -157,7 +157,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--imgsz", type=int, default=640)
-    parser.add_argument("--device", default="mps", help="Device: mps, cuda, cpu")
+    parser.add_argument("--device", default=None, help="Device: cuda, mps, cpu (auto-detects if not set)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--name", default="yolov8n-wildlife", help="Run name")
@@ -251,7 +251,10 @@ def main() -> None:
     else:
         model = YOLO(args.model)
 
-    print(f"Device: {args.device}")
+    from config.settings import get_device
+    device = get_device(args.device)
+
+    print(f"Device: {device}")
     print(f"Output: {OUTPUT_DIR / args.name}")
     print(f"Resume: {args.resume}")
 
@@ -260,7 +263,7 @@ def main() -> None:
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
-        device=args.device,
+        device=device,
         project=str(OUTPUT_DIR),
         name=args.name,
         exist_ok=True,
