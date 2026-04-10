@@ -28,8 +28,9 @@ from ultralytics import YOLO
 from ultralytics.data.dataset import YOLODataset
 import ultralytics.data.build as build
 
-PROJECT_ROOT = Path("/Users/christianloth/Documents/Programs/bird-feeder-ai")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATASET_YAML = PROJECT_ROOT / "data" / "wildlife-yolo" / "dataset.yaml"
+DATASET_DIR = DATASET_YAML.parent
 OUTPUT_DIR = PROJECT_ROOT / "models" / "wildlife"
 
 
@@ -183,7 +184,7 @@ def print_class_warnings(min_samples: int) -> None:
     with open(DATASET_YAML) as f:
         ds = yaml.safe_load(f)
 
-    label_dir = Path(ds["path"]) / "labels" / "train"
+    label_dir = DATASET_DIR / "labels" / "train"
     if not label_dir.exists():
         return
 
@@ -193,11 +194,19 @@ def print_class_warnings(min_samples: int) -> None:
     for txt_file in label_dir.iterdir():
         if txt_file.suffix != ".txt":
             continue
-        for line in txt_file.read_text().splitlines():
+        try:
+            text = txt_file.read_text(errors="ignore")
+        except OSError:
+            continue
+        for line in text.splitlines():
             parts = line.strip().split()
-            if parts:
+            if not parts:
+                continue
+            try:
                 class_id = int(parts[0])
-                counts[class_id] = counts.get(class_id, 0) + 1
+            except ValueError:
+                continue
+            counts[class_id] = counts.get(class_id, 0) + 1
 
     print("\nTraining set class distribution:")
     for class_id in sorted(names.keys()):
@@ -258,8 +267,18 @@ def main() -> None:
     print(f"Output: {OUTPUT_DIR / args.name}")
     print(f"Resume: {args.resume}")
 
+    # Resolve dataset.yaml path to this machine's absolute path
+    import yaml
+    with open(DATASET_YAML) as f:
+        ds_cfg = yaml.safe_load(f)
+    ds_cfg["path"] = str(DATASET_DIR)
+    resolved_yaml = OUTPUT_DIR / args.name / "dataset.yaml"
+    resolved_yaml.parent.mkdir(parents=True, exist_ok=True)
+    with open(resolved_yaml, "w") as f:
+        yaml.safe_dump(ds_cfg, f, default_flow_style=False)
+
     train_kwargs = dict(
-        data=str(DATASET_YAML),
+        data=str(resolved_yaml),
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,

@@ -295,7 +295,7 @@ def export_yolo(
         yaml_path = output_dir / "dataset.yaml"
         with open(yaml_path, "w") as f:
             f.write(f"# Exported {datetime.now().isoformat()}\n")
-            f.write(f"path: {output_dir.resolve()}\n")
+            f.write("path: .  # resolved at runtime by train script\n")
             f.write("train: images/train\n")
             f.write("val: images/val\n\n")
             f.write(f"nc: {len(class_list)}\n")
