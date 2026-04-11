@@ -86,7 +86,12 @@ class BirdPipeline:
             logger.info(f"  Day/night: enabled")
         else:
             logger.info(f"  Day/night: disabled (daytime only)")
-        logger.info(f"  Storage: {'enabled' if self.save_enabled else 'DISABLED (--no-save)'}")
+        if self.save_enabled:
+            logger.info("  Storage: enabled (database + detections/rtsp/)")
+        elif self._source in ("image", "video"):
+            logger.info("  Storage: off (use --output for annotated output)")
+        else:
+            logger.info("  Storage: DISABLED (--no-save)")
 
         self._running = False
         self._total_detections = 0
@@ -396,12 +401,17 @@ class BirdPipeline:
                 f"{self._total_detections} detections total."
             )
 
-    def run_on_image(self, image_path: str | Path) -> list[dict]:
+    def run_on_image(
+        self,
+        image_path: str | Path,
+        output: str | Path | None = None,
+    ) -> list[dict]:
         """
         Run the pipeline on a single image file. Useful for testing.
 
         Args:
             image_path: Path to an image file.
+            output: If provided, save an annotated copy with bounding boxes.
 
         Returns:
             List of detections.
@@ -414,8 +424,6 @@ class BirdPipeline:
 
         self._source = "image"
         self._log_pipeline_config()
-        if self.save_enabled:
-            self._init_database()
 
         # Use min_frames=1 so detections are immediate
         self.tracker = BirdTracker(min_frames_for_detection=1)
@@ -427,26 +435,53 @@ class BirdPipeline:
             )
         if not detections:
             logger.info("  No detections")
+
+        # Save annotated image if requested
+        if output and detections:
+            output = Path(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            annotated = frame.copy()
+            for det in detections:
+                x1, y1, x2, y2 = det["bbox"]
+                conf = det["confidence"]
+                label = f"{det['species']} {conf:.2f}"
+
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                (tw, th), _ = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1,
+                )
+                cv2.rectangle(
+                    annotated, (x1, y1 - th - 8), (x1 + tw + 4, y1),
+                    (0, 0, 255), -1,
+                )
+                cv2.putText(
+                    annotated, label, (x1 + 2, y1 - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+                    cv2.LINE_AA,
+                )
+            cv2.imwrite(str(output), annotated)
+            logger.info(f"Annotated image saved: {output}")
+
         return detections
 
     def run_on_video(
         self,
         video_path: str | Path,
         process_every_n: int | None = None,
-        output_video: str | Path | None = None,
+        output: str | Path | None = None,
     ) -> list[dict]:
         """
         Run the pipeline on a video file.
 
         Processes frames through the full pipeline (detect → track → classify)
-        and saves detections to the database and detections/ folder, just like
-        live RTSP mode.
+        and logs detections. No database or image storage — use --output to
+        save an annotated video with bounding boxes.
 
         Args:
             video_path: Path to a video file (mp4, avi, etc.).
             process_every_n: Process every Nth frame. If None, uses the
                 pipeline's configured FrameSkipper value.
-            output_video: If set, write an annotated video with bounding boxes,
+            output: If set, write an annotated video with bounding boxes,
                 class labels, and confidence scores to this path.
 
         Returns:
@@ -476,17 +511,15 @@ class BirdPipeline:
 
         # Set up output video writer if requested
         video_writer = None
-        if output_video:
-            output_video = Path(output_video)
-            output_video.parent.mkdir(parents=True, exist_ok=True)
+        if output:
+            output = Path(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             video_writer = cv2.VideoWriter(
-                str(output_video), fourcc, fps, (width, height),
+                str(output), fourcc, fps, (width, height),
             )
-            logger.info(f"  Output video: {output_video}")
+            logger.info(f"  Output video: {output}")
 
-        if self.save_enabled:
-            self._init_database()
         self.tracker = BirdTracker(min_frames_for_detection=1)
 
         skip = process_every_n or self.skipper.process_every_n
@@ -512,8 +545,17 @@ class BirdPipeline:
                     frame_num += 1
                     continue
 
-                # Update active boxes for video annotation
-                active_boxes = detections
+                # Update active boxes from all classified tracks (not just new ones)
+                active_boxes = [
+                    {
+                        "species": t.species,
+                        "confidence": t.confidence,
+                        "bbox": t.bbox,
+                        "track_id": t.track_id,
+                    }
+                    for t in self.tracker.active_tracks
+                    if t.classified
+                ]
 
                 for det in detections:
                     det["frame_num"] = frame_num
@@ -558,7 +600,7 @@ class BirdPipeline:
         cap.release()
         if video_writer:
             video_writer.release()
-            logger.info(f"Output video saved: {output_video}")
+            logger.info(f"Output video saved: {output}")
 
         elapsed = time.time() - t_start
 
@@ -728,12 +770,12 @@ if __name__ == "__main__":
         help="Deployment mode: 'dev' (Mac/PC) or 'hailo' (Raspberry Pi)",
     )
     parser.add_argument(
-        "--image", type=str, default=None,
-        help="Run on a single image instead of live camera",
+        "--image", type=str, nargs="+", default=None,
+        help="Run on one or more image files (supports shell globs)",
     )
     parser.add_argument(
-        "--video", type=str, default=None,
-        help="Run on a video file instead of live camera",
+        "--video", type=str, nargs="+", default=None,
+        help="Run on one or more video files (supports shell globs)",
     )
     parser.add_argument(
         "--process-every-n", type=int, default=None,
@@ -757,12 +799,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--no-save", action="store_true",
-        help="Disable saving detections to database and disk (log only)",
+        help="Disable saving detections to database and disk (RTSP only)",
     )
     parser.add_argument(
-        "--output-video", nargs="?", const="auto", default=None,
-        help="Write annotated video with bounding boxes (only with --video). "
-             "Optionally specify a path; defaults to output_inference_videos/",
+        "--output", nargs="?", const="auto", default=None,
+        help="Save annotated output (with --video or --image). "
+             "Optionally specify a path; defaults to detections/video/ or detections/image/",
     )
     parser.add_argument(
         "--log-level",
@@ -779,51 +821,78 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    # Only RTSP mode saves to database/storage; image and video never do
+    is_offline = args.image or args.video
+    if args.no_save and is_offline:
+        parser.error("--no-save is only for RTSP mode (image/video never save to database)")
+    save_enabled = False if is_offline else not args.no_save
+
     if args.mode == "dev":
         pipeline = create_pipeline_dev(
             checkpoint_path=args.checkpoint,
             rtsp_url=args.rtsp_url,
             device=args.device,
             enable_night_mode=not args.no_night,
-            save_enabled=not args.no_save,
+            save_enabled=save_enabled,
         )
     else:
         pipeline = create_pipeline_hailo(
             rtsp_url=args.rtsp_url,
             enable_night_mode=not args.no_night,
-            save_enabled=not args.no_save,
+            save_enabled=save_enabled,
         )
 
-    if args.output_video and not args.video:
-        parser.error("--output-video requires --video")
+    if args.output and not is_offline:
+        parser.error("--output requires --video or --image")
 
-    # Resolve --output-video default path
-    if args.output_video == "auto" and args.video:
-        output_dir = settings.project_root / "output_inference_videos"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        input_stem = Path(args.video).stem
-        args.output_video = str(output_dir / f"{input_stem}_annotated.mp4")
+    # Custom --output path only makes sense with a single input file
+    if args.output and args.output != "auto":
+        file_count = len(args.video or args.image or [])
+        if file_count > 1:
+            parser.error("--output with a custom path requires a single input file")
 
     if args.image:
-        results = pipeline.run_on_image(args.image)
-        if results:
-            for r in results:
-                print(f"{r['species']} ({r['confidence']:.2f}) at {r['bbox']}")
-        else:
-            print("No birds detected.")
+        for image_file in args.image:
+            # Resolve auto output path per file
+            output_path = None
+            if args.output == "auto":
+                output_dir = settings.detections_dir / "image"
+                input_path = Path(image_file)
+                output_path = str(
+                    output_dir / f"{input_path.stem}_annotated{input_path.suffix}"
+                )
+            elif args.output:
+                output_path = args.output
+
+            results = pipeline.run_on_image(image_file, output=output_path)
+            if results:
+                for r in results:
+                    print(f"{r['species']} ({r['confidence']:.2f}) at {r['bbox']}")
+            else:
+                print(f"No birds detected in {Path(image_file).name}.")
     elif args.video:
-        results = pipeline.run_on_video(
-            args.video,
-            process_every_n=args.process_every_n,
-            output_video=args.output_video,
-        )
-        if results:
-            print(f"\n{'='*60}")
-            print(f"Video inference complete: {len(results)} detections")
-            print(f"{'='*60}")
-            for r in results:
-                print(f"  [{r['video_time']}] {r['species']} ({r['confidence']:.2f})")
-        else:
-            print("No detections in video.")
+        for video_file in args.video:
+            # Resolve auto output path per file
+            output_path = None
+            if args.output == "auto":
+                output_dir = settings.detections_dir / "video"
+                input_stem = Path(video_file).stem
+                output_path = str(output_dir / f"{input_stem}_annotated.mp4")
+            elif args.output:
+                output_path = args.output
+
+            results = pipeline.run_on_video(
+                video_file,
+                process_every_n=args.process_every_n,
+                output=output_path,
+            )
+            if results:
+                print(f"\n{'='*60}")
+                print(f"Video inference complete: {len(results)} detections")
+                print(f"{'='*60}")
+                for r in results:
+                    print(f"  [{r['video_time']}] {r['species']} ({r['confidence']:.2f})")
+            else:
+                print(f"No detections in {Path(video_file).name}.")
     else:
         pipeline.run()

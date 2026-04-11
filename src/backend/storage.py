@@ -22,7 +22,7 @@ class ImageStorage:
     """Manages saving and organizing detection frame images on disk."""
 
     def __init__(self, base_dir: Path | None = None):
-        self.base_dir = base_dir or settings.detections_dir
+        self.base_dir = base_dir or settings.detections_dir / "rtsp"
 
     def _get_day_dir(self, timestamp: datetime) -> Path:
         """Get the directory for a given day: detections/YYYY/MM/DD/"""

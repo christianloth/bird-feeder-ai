@@ -133,6 +133,9 @@ def _set_sqlite_pragmas(dbapi_conn, connection_record):
 def get_engine(database_url: str | None = None):
     """Create a SQLAlchemy engine for the bird database."""
     url = database_url or settings.database_url
+    # Ensure the db/ directory exists (SQLite won't create parent dirs)
+    db_path = url.replace("sqlite:///", "")
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url, connect_args={"check_same_thread": False})
     event.listen(engine, "connect", _set_sqlite_pragmas)
     return engine

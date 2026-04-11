@@ -76,7 +76,7 @@ class Settings:
     process_every_n: int = _pipeline.get("process_every_n", 5)
 
     # Database
-    database_url: str = f"sqlite:///{_PROJECT_ROOT / 'data' / 'birds.db'}"
+    database_url: str = f"sqlite:///{_PROJECT_ROOT / 'db' / 'birds.db'}"
 
     # Weather / Location
     latitude: float = _location.get("latitude", 33.1507)
