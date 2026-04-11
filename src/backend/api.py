@@ -8,10 +8,13 @@ and system status. Will be consumed by the future dashboard.
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
+from io import BytesIO
 from typing import Annotated
+from urllib.parse import urlencode
 
 from pathlib import Path as _Path
 
+from PIL import Image
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -355,8 +358,6 @@ def get_daily_summaries(
 @app.get("/api/detections/{detection_id}/crop")
 def get_detection_crop(detection_id: int, session: SessionDep):
     """Serve the cropped detection image on-the-fly from the saved frame + bbox."""
-    from io import BytesIO
-
     detection = session.get(Detection, detection_id)
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
@@ -509,6 +510,211 @@ def review_correct(
         detection.corrected_species_id = species_id
         session.commit()
     return review_next_card(request, session)
+
+
+# --- Dashboard ---
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page(request: Request, session: SessionDep):
+    """Serve the main dashboard with gallery, stats, and filters."""
+    total = session.query(func.count(Detection.id)).scalar() or 0
+    unique_species = (
+        session.query(func.count(func.distinct(Detection.species_id)))
+        .filter(Detection.species_id.isnot(None))
+        .scalar()
+        or 0
+    )
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    today_count = (
+        session.query(func.count(Detection.id)).filter(Detection.timestamp >= today_start).scalar()
+        or 0
+    )
+    avg_conf = session.query(func.avg(Detection.confidence)).scalar() or 0.0
+    disk_mb = _image_storage.get_disk_usage_mb()
+
+    species_list = (
+        session.query(Species)
+        .filter(
+            Species.id.in_(
+                session.query(func.distinct(Detection.species_id)).filter(
+                    Detection.species_id.isnot(None)
+                )
+            )
+        )
+        .order_by(Species.common_name)
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard.html",
+        context={
+            "total_detections": total,
+            "unique_species": unique_species,
+            "detections_today": today_count,
+            "avg_confidence": round(avg_conf * 100, 1),
+            "disk_usage_mb": round(disk_mb, 1),
+            "species_list": species_list,
+        },
+    )
+
+
+@app.get("/api/dashboard/gallery", response_class=HTMLResponse)
+def dashboard_gallery(
+    request: Request,
+    session: SessionDep,
+    species_id: str = "",
+    since: str = "",
+    until: str = "",
+    min_confidence: str = "",
+    reviewed: str = "",
+    page: int = 1,
+    per_page: int = 24,
+):
+    """Return gallery grid items as an HTMX fragment."""
+    query = session.query(Detection).join(Detection.species, isouter=True)
+
+    if species_id:
+        query = query.filter(Detection.species_id == int(species_id))
+    if since:
+        query = query.filter(Detection.timestamp >= datetime.fromisoformat(since))
+    if until:
+        until_dt = datetime.fromisoformat(until) + timedelta(days=1)
+        query = query.filter(Detection.timestamp < until_dt)
+    if min_confidence:
+        query = query.filter(Detection.confidence >= float(min_confidence))
+    if reviewed == "pending":
+        query = query.filter(Detection.reviewed.is_(False))
+    elif reviewed == "reviewed":
+        query = query.filter(Detection.reviewed.is_(True), Detection.is_false_positive.is_(False))
+    elif reviewed == "false_positive":
+        query = query.filter(Detection.is_false_positive.is_(True))
+
+    total = query.count()
+    offset = (page - 1) * per_page
+    detections = query.order_by(desc(Detection.timestamp)).offset(offset).limit(per_page).all()
+    has_more = offset + per_page < total
+
+    # Build filter query string for pagination
+    filter_params = {}
+    if species_id:
+        filter_params["species_id"] = species_id
+    if since:
+        filter_params["since"] = since
+    if until:
+        filter_params["until"] = until
+    if min_confidence:
+        filter_params["min_confidence"] = min_confidence
+    if reviewed:
+        filter_params["reviewed"] = reviewed
+    filters_qs = urlencode(filter_params) if filter_params else ""
+
+    return templates.TemplateResponse(
+        request=request,
+        name="gallery_items.html",
+        context={
+            "detections": detections,
+            "page": page,
+            "total": total,
+            "has_more": has_more,
+            "filters": filters_qs,
+        },
+    )
+
+
+# --- Annotated Frame ---
+
+
+@app.get("/api/detections/{detection_id}/annotated")
+def get_annotated_frame(detection_id: int, session: SessionDep):
+    """Serve the full frame with bounding box drawn on it."""
+    from PIL import ImageDraw, ImageFont
+
+    detection = session.get(Detection, detection_id)
+    if not detection:
+        raise HTTPException(status_code=404, detail="Detection not found")
+    if not detection.frame_path:
+        raise HTTPException(status_code=404, detail="No frame image for this detection")
+
+    frame_path = _image_storage.get_absolute_path(detection.frame_path)
+    if not frame_path.exists():
+        raise HTTPException(status_code=404, detail="Frame image file not found on disk")
+
+    img = Image.open(frame_path)
+    draw = ImageDraw.Draw(img)
+
+    if all(
+        v is not None
+        for v in [detection.bbox_x1, detection.bbox_y1, detection.bbox_x2, detection.bbox_y2]
+    ):
+        x1, y1 = int(detection.bbox_x1), int(detection.bbox_y1)
+        x2, y2 = int(detection.bbox_x2), int(detection.bbox_y2)
+
+        # Draw bounding box
+        bbox_color = "#3fb950"
+        for offset in range(3):
+            draw.rectangle(
+                [x1 - offset, y1 - offset, x2 + offset, y2 + offset],
+                outline=bbox_color,
+            )
+
+        # Draw label background + text
+        species_name = detection.species.common_name if detection.species else "Unknown"
+        conf_pct = f"{detection.confidence * 100:.1f}%"
+        label = f"{species_name} {conf_pct}"
+
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+
+        bbox = draw.textbbox((x1, y1), label, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        draw.rectangle(
+            [x1, y1 - text_h - 8, x1 + text_w + 8, y1],
+            fill=bbox_color,
+        )
+        draw.text((x1 + 4, y1 - text_h - 6), label, fill="white", font=font)
+
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    buf.seek(0)
+    return Response(content=buf.read(), media_type="image/jpeg")
+
+
+# --- Delete Detection ---
+
+
+@app.delete("/api/detections/{detection_id}")
+def delete_detection(detection_id: int, session: SessionDep):
+    """Delete a detection, removing both the database row and the image file from disk."""
+    detection = session.get(Detection, detection_id)
+    if not detection:
+        raise HTTPException(status_code=404, detail="Detection not found")
+
+    # Delete the image file if it exists
+    if detection.frame_path:
+        frame_path = _image_storage.get_absolute_path(detection.frame_path)
+        if frame_path.exists():
+            frame_path.unlink()
+            logger.info(f"Deleted image file: {detection.frame_path}")
+
+            # Clean up empty parent directories
+            parent = frame_path.parent
+            while parent != _image_storage.base_dir:
+                if parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+                else:
+                    break
+
+    session.delete(detection)
+    session.commit()
+    logger.info(f"Deleted detection #{detection_id}")
+
+    return {"ok": True, "detection_id": detection_id}
 
 
 # --- System ---

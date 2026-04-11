@@ -47,7 +47,7 @@ The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night 
 1. **Detection** -- YOLO11n finds birds (COCO class 14) and outputs bounding boxes
 2. **Tracking** -- Centroid-based tracker deduplicates so a bird sitting for 30 seconds is logged once
 3. **Classification** -- Cropped bird region is classified by EfficientNet-B2 (555 NABirds species)
-4. **Storage** -- Detection saved to SQLite with species, confidence, bbox, annotated crop, clean crop (no bbox), thumbnail, and full frame
+4. **Storage** -- Detection saved to SQLite with species, confidence, bbox coordinates, and one full frame image (crops generated on-the-fly)
 
 **Nighttime pipeline (wildlife):**
 1. **Detection** -- YOLO11n wildlife model detects 11 classes: bird, bobcat, coyote, raccoon, rabbit, skunk, opossum, squirrel, armadillo, cat, dog
@@ -208,13 +208,20 @@ uvicorn src.backend.api:app --host 0.0.0.0 --port 8000
 
 Interactive API docs: `http://localhost:8000/docs`
 
+### Review detections
+
+Open `http://localhost:8000/review` to review detections. Keyboard shortcuts: **A** = confirm, **X** = false positive, **C** = correct species, **Esc** = cancel.
+
 ### Key endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Health check |
+| `GET` | `/review` | Detection review UI (HTMX) |
 | `GET` | `/api/detections` | List detections (filterable by species, date, confidence) |
 | `GET` | `/api/detections/{id}` | Get a single detection with all metadata |
+| `GET` | `/api/detections/{id}/crop` | Cropped detection image (generated on-the-fly) |
+| `GET` | `/api/detections/{id}/frame` | Full frame image |
 | `PATCH` | `/api/detections/{id}/review` | Review: confirm, reject, or correct species |
 | `GET` | `/api/stats` | Overall detection statistics |
 | `GET` | `/api/stats/species` | Detection count per species |

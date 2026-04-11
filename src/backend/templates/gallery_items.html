@@ -1,0 +1,68 @@
+{% if detections %}
+{% for d in detections %}
+<div class="gallery-card" id="card-{{ d.id }}">
+    {% if d.reviewed and d.is_false_positive %}
+    <span class="review-badge badge-false-positive">False Positive</span>
+    {% elif d.reviewed %}
+    <span class="review-badge badge-reviewed">Reviewed</span>
+    {% else %}
+    <span class="review-badge badge-pending">Pending</span>
+    {% endif %}
+
+    <img src="/api/detections/{{ d.id }}/crop"
+         alt="{{ d.species.common_name if d.species else 'Unknown' }}"
+         loading="lazy"
+         onclick="viewFrame({{ d.id }}, '{{ d.species.common_name if d.species else "Unknown" }}', {{ (d.confidence * 100) | round(1) }})">
+
+    <div class="info">
+        <div class="species-name">{{ d.species.common_name if d.species else "Unknown" }}</div>
+        <div class="meta-line">
+            {{ d.timestamp.strftime('%Y-%m-%d %H:%M:%S') if d.timestamp else 'N/A' }}
+        </div>
+        <div class="meta-line">
+            {% set conf_pct = (d.confidence * 100) | round(1) %}
+            {% if d.confidence >= 0.8 %}
+            <span class="confidence-badge conf-high">{{ conf_pct }}%</span>
+            {% elif d.confidence >= 0.5 %}
+            <span class="confidence-badge conf-medium">{{ conf_pct }}%</span>
+            {% else %}
+            <span class="confidence-badge conf-low">{{ conf_pct }}%</span>
+            {% endif %}
+            &nbsp; #{{ d.id }} &middot; {{ d.source or 'unknown' }}
+        </div>
+    </div>
+    <div class="card-actions">
+        <button class="btn-sm btn-view"
+                onclick="viewFrame({{ d.id }}, '{{ d.species.common_name if d.species else "Unknown" }}', {{ (d.confidence * 100) | round(1) }})">
+            View Frame
+        </button>
+        <button class="btn-sm btn-delete"
+                onclick="confirmDelete({{ d.id }})">
+            Delete
+        </button>
+    </div>
+</div>
+{% endfor %}
+
+{% if has_more %}
+<div class="pagination" style="grid-column: 1 / -1;">
+    <button class="btn-page"
+            hx-get="/api/dashboard/gallery?page={{ page + 1 }}{% if filters %}&{{ filters }}{% endif %}"
+            hx-target="#gallery"
+            hx-swap="innerHTML">
+        Load More
+    </button>
+    <span class="page-info">Page {{ page }} &middot; {{ total }} total detections</span>
+</div>
+{% else %}
+<div class="page-info" style="grid-column: 1 / -1; text-align: center; padding: 16px;">
+    {{ total }} detection{{ 's' if total != 1 else '' }} total
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state" style="grid-column: 1 / -1;">
+    <h2>No detections found</h2>
+    <p>Try adjusting your filters, or wait for the pipeline to detect some birds.</p>
+</div>
+{% endif %}

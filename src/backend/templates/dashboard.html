@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bird Feeder AI - Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐦</text></svg>">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1117;
+            color: #e1e4e8;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* --- Header --- */
+        header {
+            max-width: 1400px;
+            margin: 0 auto 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 { font-size: 1.5rem; color: #58a6ff; }
+        .nav-links { display: flex; gap: 16px; }
+        .nav-links a {
+            color: #8b949e;
+            text-decoration: none;
+            font-size: 0.9rem;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+        .nav-links a:hover { color: #e1e4e8; background: #21262d; }
+        .nav-links a.active { color: #58a6ff; background: #161b22; }
+
+        /* --- Stats Cards --- */
+        .stats-row {
+            max-width: 1400px;
+            margin: 0 auto 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+        .stat-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #58a6ff;
+        }
+        .stat-card .label {
+            font-size: 0.8rem;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+
+        /* --- Filters --- */
+        .filters {
+            max-width: 1400px;
+            margin: 0 auto 20px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+        .filter-group { display: flex; flex-direction: column; gap: 4px; }
+        .filter-group label {
+            font-size: 0.75rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .filter-group select,
+        .filter-group input {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #e1e4e8;
+            padding: 8px 12px;
+            font-size: 0.85rem;
+        }
+        .filter-group select:focus,
+        .filter-group input:focus { outline: none; border-color: #58a6ff; }
+        .filter-actions { display: flex; gap: 8px; align-items: flex-end; }
+        .btn-filter {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-apply { background: #238636; color: white; }
+        .btn-apply:hover { background: #2ea043; }
+        .btn-reset { background: #21262d; color: #e1e4e8; border: 1px solid #30363d; }
+        .btn-reset:hover { background: #30363d; }
+
+        /* --- Gallery Grid --- */
+        .gallery {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .gallery-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            overflow: hidden;
+            transition: all 0.15s;
+            position: relative;
+        }
+        .gallery-card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+        .gallery-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            cursor: pointer;
+            display: block;
+        }
+        .gallery-card .info {
+            padding: 12px;
+        }
+        .gallery-card .species-name {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 4px;
+        }
+        .gallery-card .meta-line {
+            font-size: 0.75rem;
+            color: #8b949e;
+            margin-bottom: 2px;
+        }
+        .gallery-card .confidence-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .conf-high { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
+        .conf-medium { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+        .conf-low { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+        .gallery-card .card-actions {
+            padding: 8px 12px 12px;
+            display: flex;
+            gap: 8px;
+        }
+        .btn-sm {
+            padding: 5px 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-view { background: #1f6feb; color: white; }
+        .btn-view:hover { background: #388bfd; }
+        .btn-delete { background: #da3633; color: white; }
+        .btn-delete:hover { background: #f85149; }
+        .btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+        .review-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .badge-reviewed { background: rgba(63, 185, 80, 0.8); color: white; }
+        .badge-false-positive { background: rgba(248, 81, 73, 0.8); color: white; }
+        .badge-pending { background: rgba(139, 148, 158, 0.6); color: white; }
+
+        /* --- Empty State --- */
+        .empty-state {
+            max-width: 1400px;
+            margin: 60px auto;
+            text-align: center;
+            color: #8b949e;
+        }
+        .empty-state h2 { color: #58a6ff; margin-bottom: 8px; }
+
+        /* --- Modal --- */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-content {
+            max-width: 1000px;
+            max-height: 90vh;
+            position: relative;
+        }
+        .modal-content img {
+            max-width: 100%;
+            max-height: 85vh;
+            border-radius: 8px;
+            border: 2px solid #30363d;
+        }
+        .modal-close {
+            position: absolute;
+            top: -12px;
+            right: -12px;
+            background: #da3633;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-info {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 0 0 8px 8px;
+            padding: 12px 16px;
+            margin-top: -4px;
+            font-size: 0.85rem;
+        }
+
+        /* --- Pagination --- */
+        .pagination {
+            max-width: 1400px;
+            margin: 20px auto;
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn-page {
+            padding: 8px 16px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #e1e4e8;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-page:hover { background: #30363d; }
+        .btn-page:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-page.active { background: #1f6feb; border-color: #1f6feb; }
+        .page-info { color: #8b949e; font-size: 0.85rem; align-self: center; }
+
+        /* --- Confirm Dialog --- */
+        .confirm-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+        }
+        .confirm-overlay.active { display: flex; }
+        .confirm-box {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            max-width: 400px;
+        }
+        .confirm-box h3 { margin-bottom: 8px; color: #f85149; }
+        .confirm-box p { color: #8b949e; font-size: 0.9rem; margin-bottom: 16px; }
+        .confirm-actions { display: flex; gap: 12px; justify-content: center; }
+        .btn-cancel { background: #21262d; color: #e1e4e8; border: 1px solid #30363d; }
+
+        .htmx-request .btn-sm { opacity: 0.5; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Bird Feeder AI</h1>
+        <div class="nav-links">
+            <a href="/dashboard" class="active">Dashboard</a>
+            <a href="/review">Review</a>
+        </div>
+    </header>
+
+    <!-- Stats -->
+    <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+            <div class="value">{{ total_detections }}</div>
+            <div class="label">Total Detections</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">{{ unique_species }}</div>
+            <div class="label">Species Seen</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">{{ detections_today }}</div>
+            <div class="label">Today</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">{{ avg_confidence }}%</div>
+            <div class="label">Avg Confidence</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">{{ disk_usage_mb }} MB</div>
+            <div class="label">Disk Usage</div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters" id="filters">
+        <div class="filter-group">
+            <label>Species</label>
+            <select name="species_id"
+                    hx-get="/api/dashboard/gallery"
+                    hx-include="#filters"
+                    hx-target="#gallery"
+                    hx-swap="innerHTML">
+                <option value="">All Species</option>
+                {% for sp in species_list %}
+                <option value="{{ sp.id }}">{{ sp.common_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Since</label>
+            <input type="date" name="since"
+                   hx-get="/api/dashboard/gallery"
+                   hx-include="#filters"
+                   hx-target="#gallery"
+                   hx-swap="innerHTML">
+        </div>
+        <div class="filter-group">
+            <label>Until</label>
+            <input type="date" name="until"
+                   hx-get="/api/dashboard/gallery"
+                   hx-include="#filters"
+                   hx-target="#gallery"
+                   hx-swap="innerHTML">
+        </div>
+        <div class="filter-group">
+            <label>Min Confidence</label>
+            <select name="min_confidence"
+                    hx-get="/api/dashboard/gallery"
+                    hx-include="#filters"
+                    hx-target="#gallery"
+                    hx-swap="innerHTML">
+                <option value="">Any</option>
+                <option value="0.9">90%+</option>
+                <option value="0.8">80%+</option>
+                <option value="0.7">70%+</option>
+                <option value="0.5">50%+</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Review Status</label>
+            <select name="reviewed"
+                    hx-get="/api/dashboard/gallery"
+                    hx-include="#filters"
+                    hx-target="#gallery"
+                    hx-swap="innerHTML">
+                <option value="">All</option>
+                <option value="pending">Pending Review</option>
+                <option value="reviewed">Reviewed</option>
+                <option value="false_positive">False Positives</option>
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="button" class="btn-filter btn-reset" onclick="resetFilters()">Reset</button>
+        </div>
+    </div>
+
+    <!-- Gallery -->
+    <div class="gallery" id="gallery"
+         hx-get="/api/dashboard/gallery"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+    </div>
+
+    <!-- Frame viewer modal -->
+    <div class="modal-overlay" id="frame-modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <img id="modal-img" src="" alt="Detection frame">
+            <div class="modal-info" id="modal-info"></div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation -->
+    <div class="confirm-overlay" id="confirm-delete">
+        <div class="confirm-box">
+            <h3>Delete Detection</h3>
+            <p>This will permanently remove the detection and its image from disk.</p>
+            <div class="confirm-actions">
+                <button class="btn-sm btn-delete" id="confirm-yes">Delete</button>
+                <button class="btn-sm btn-cancel" onclick="closeConfirm()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // View full frame with bounding box overlay
+        function viewFrame(detectionId, speciesName, confidence) {
+            const modal = document.getElementById('frame-modal');
+            const img = document.getElementById('modal-img');
+            const info = document.getElementById('modal-info');
+            img.src = '/api/detections/' + detectionId + '/annotated';
+            info.innerHTML = '<strong>' + speciesName + '</strong> &mdash; ' +
+                             confidence + '% confidence &mdash; Detection #' + detectionId;
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('frame-modal').classList.remove('active');
+        }
+
+        // Delete confirmation
+        let pendingDeleteId = null;
+
+        function confirmDelete(detectionId) {
+            pendingDeleteId = detectionId;
+            document.getElementById('confirm-delete').classList.add('active');
+        }
+
+        function closeConfirm() {
+            pendingDeleteId = null;
+            document.getElementById('confirm-delete').classList.remove('active');
+        }
+
+        document.getElementById('confirm-yes').addEventListener('click', function() {
+            if (!pendingDeleteId) return;
+            fetch('/api/detections/' + pendingDeleteId, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        const card = document.getElementById('card-' + pendingDeleteId);
+                        if (card) card.remove();
+                    }
+                    closeConfirm();
+                });
+        });
+
+        // Reset filters
+        function resetFilters() {
+            var container = document.getElementById('filters');
+            container.querySelectorAll('select').forEach(function(s) { s.selectedIndex = 0; });
+            container.querySelectorAll('input').forEach(function(i) { i.value = ''; });
+            htmx.ajax('GET', '/api/dashboard/gallery', {target: '#gallery', swap: 'innerHTML'});
+        }
+
+        // Close modals on Escape
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+                closeConfirm();
+            }
+        });
+
+        // Close modal on overlay click
+        document.getElementById('frame-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+    </script>
+</body>
+</html>
