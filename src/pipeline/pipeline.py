@@ -72,6 +72,22 @@ class BirdPipeline:
         self.save_enabled = save_enabled
         self._source = "rtsp"  # Updated by run_on_image/run_on_video
 
+    def _log_pipeline_config(self) -> None:
+        """Log pipeline configuration at startup."""
+        from config.settings import get_device
+        device = get_device()
+        logger.info("Pipeline configuration:")
+        logger.info(f"  Device: {device}")
+        logger.info(f"  Detector: {settings.detection_model}")
+        logger.info(f"  Classifier: {self.classifier.backend} ({self.classifier.device})")
+        if self.wildlife_detector:
+            logger.info(f"  Wildlife: {settings.wildlife_model}")
+        if self.mode_manager:
+            logger.info(f"  Day/night: enabled")
+        else:
+            logger.info(f"  Day/night: disabled (daytime only)")
+        logger.info(f"  Storage: {'enabled' if self.save_enabled else 'DISABLED (--no-save)'}")
+
         self._running = False
         self._total_detections = 0
         self._session_factory = None
@@ -318,18 +334,10 @@ class BirdPipeline:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        logger.info("Starting bird detection pipeline...")
-        logger.info(f"  Storage: {'enabled' if self.save_enabled else 'DISABLED (--no-save)'}")
-        logger.info(f"  Detector: {self.detector.backend}")
-        logger.info(f"  Classifier: {self.classifier.backend}")
-        if self.wildlife_detector:
-            logger.info(f"  Wildlife detector: {self.wildlife_detector.backend}")
+        self._log_pipeline_config()
         if self.mode_manager:
-            logger.info("  Day/night mode: sun-time switching enabled")
             self.mode_manager.check_now()
             logger.info(f"  Initial mode: {self.mode_manager.mode.value}")
-        else:
-            logger.info("  Day/night mode: disabled (daytime only)")
         logger.info(f"  Processing every {self.skipper.process_every_n} frames")
 
         if not self.camera.start():
@@ -405,6 +413,7 @@ class BirdPipeline:
             raise FileNotFoundError(f"Could not load image: {image_path}")
 
         self._source = "image"
+        self._log_pipeline_config()
         if self.save_enabled:
             self._init_database()
 
@@ -457,6 +466,7 @@ class BirdPipeline:
         duration = total_frames / fps
 
         self._source = "video"
+        self._log_pipeline_config()
         logger.info(f"Processing video: {video_path.name}")
         logger.info(f"  Resolution: {width}x{height}, FPS: {fps:.0f}, "
                      f"Duration: {duration:.1f}s, Frames: {total_frames}")
