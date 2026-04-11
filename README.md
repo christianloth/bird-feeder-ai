@@ -307,37 +307,6 @@ python -m scripts.export_training_data --format both --since 2026-04-01
 | `--val-split` | `0.2` | Fraction of data for validation (YOLO export) |
 | `--clean` | Off | Delete existing export directory before exporting |
 
-### Output structure
-
-**Classification** (ImageFolder format for EfficientNet/MobileNetV2 retraining):
-
-```
-data/field-collected/classification/
-  mourning_dove/
-    20260327_135012_mourning_dove_0.98.jpg
-    20260327_135000_mourning_dove_0.97.jpg
-  inca_dove/
-    20260327_135000_inca_dove_0.86.jpg
-  manifest.txt
-```
-
-**YOLO** (for detector retraining):
-
-```
-data/field-collected/yolo/
-  images/
-    train/
-      20260327_135012_mourning_dove_0.98_frame.jpg
-    val/
-      20260327_135000_inca_dove_0.86_frame.jpg
-  labels/
-    train/
-      20260327_135012_mourning_dove_0.98_frame.txt   # class_id cx cy w h
-    val/
-      20260327_135000_inca_dove_0.86_frame.txt
-  dataset.yaml
-```
-
 ## Training
 
 The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species.
