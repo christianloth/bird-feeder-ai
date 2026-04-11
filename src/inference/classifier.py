@@ -40,7 +40,7 @@ class BirdClassifier:
         hef_model=None,
         class_names: dict[int, str] | None = None,
         device: torch.device | None = None,
-        confidence_threshold: float = 0.10,
+        confidence_threshold: float | None = None,
         input_size: int = 224,
     ):
         self.backend = backend
@@ -49,7 +49,8 @@ class BirdClassifier:
         self._hef_model = hef_model
         self.class_names = class_names or {}
         self.device = device
-        self.confidence_threshold = confidence_threshold
+        from config.settings import settings
+        self.confidence_threshold = confidence_threshold or settings.classification_confidence_threshold
         self._transform = get_inference_transforms(input_size)
 
     @classmethod
@@ -59,7 +60,7 @@ class BirdClassifier:
         class_names: dict[int, str] | None = None,
         num_classes: int = 555,
         device: str | None = None,
-        confidence_threshold: float = 0.10,
+        confidence_threshold: float | None = None,
         model_name: str = "efficientnet_b2",
     ) -> "BirdClassifier":
         """Load a PyTorch checkpoint. Auto-selects MPS/CUDA/CPU."""
@@ -103,7 +104,7 @@ class BirdClassifier:
         cls,
         onnx_path: str | Path,
         class_names: dict[int, str] | None = None,
-        confidence_threshold: float = 0.10,
+        confidence_threshold: float | None = None,
     ) -> "BirdClassifier":
         """Load an ONNX model for cross-platform inference."""
         import onnxruntime as ort
@@ -124,7 +125,7 @@ class BirdClassifier:
         cls,
         hef_path: str | Path,
         class_names: dict[int, str] | None = None,
-        confidence_threshold: float = 0.10,
+        confidence_threshold: float | None = None,
     ) -> "BirdClassifier":
         """Load a Hailo HEF model for NPU inference on Raspberry Pi."""
         from hailo_platform import HEF, VDevice, ConfigureParams

@@ -8,22 +8,26 @@ log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 camera:
   rtsp_url: "rtsp://admin:password@192.168.1.100:554/11"
 
-# --- Detection (daytime bird detection) ---
-# model: COCO YOLO for bird detection (class 14). REQUIRED.
-detection:
+# --- Daytime: Bird Detection (Stage 1) ---
+# YOLO model that scans each frame for birds (COCO class 14).
+# This only answers "is there a bird?" and draws a bounding box. REQUIRED.
+bird_detection:
   model: "models/base-models/yolo11n.pt"
-  confidence_threshold: 0.4
-  bird_class_id: 14  # COCO class 14 = "bird"
+  confidence_threshold: 0.4   # min confidence to consider a YOLO detection a bird
+  bird_class_id: 14            # COCO class 14 = "bird"
 
-# --- Classification (EfficientNet-B2 / MobileNetV2) ---
-classification:
-  confidence_threshold: 0.10
+# --- Daytime: Species Classification (Stage 2) ---
+# EfficientNet-B2 classifier that takes the cropped bird from Stage 1
+# and predicts which of 555 NABirds species it is.
+species_classification:
+  confidence_threshold: 0.60  # min confidence to accept a species prediction
 
-# --- Wildlife Detection (nighttime) ---
-# model: Custom trained wildlife YOLO model. REQUIRED.
-wildlife:
+# --- Nighttime: Wildlife Detection (single-stage) ---
+# Custom YOLO that detects AND classifies 11 wildlife classes in one shot.
+# No separate classifier — the species comes directly from this model. REQUIRED.
+wildlife_detection:
   model: "models/wildlife/yolo11s-wildlife-equal/weights/best.pt"
-  confidence_threshold: 0.4
+  confidence_threshold: 0.4   # min confidence to accept a wildlife detection
 
 # --- Day/Night Mode ---
 day_night:

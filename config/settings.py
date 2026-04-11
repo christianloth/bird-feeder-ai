@@ -24,9 +24,9 @@ def _load_yaml() -> dict:
 
 _cfg = _load_yaml()
 _camera = _cfg.get("camera", {})
-_detection = _cfg.get("detection", {})
-_classification = _cfg.get("classification", {})
-_wildlife = _cfg.get("wildlife", {})
+_bird_detection = _cfg.get("bird_detection", {})
+_species_classification = _cfg.get("species_classification", {})
+_wildlife_detection = _cfg.get("wildlife_detection", {})
 _day_night = _cfg.get("day_night", {})
 _pipeline = _cfg.get("pipeline", {})
 _location = _cfg.get("location", {})
@@ -47,21 +47,21 @@ class Settings:
     # Camera
     rtsp_url: str = _camera.get("rtsp_url", "rtsp://admin:password@192.168.1.100:554/11")
 
-    # Detection (daytime bird detection)
-    detection_model: str = _detection.get("model", "")
+    # Daytime: Bird Detection (Stage 1 — YOLO finds birds)
+    detection_model: str = _bird_detection.get("model", "")
     detection_model_path: Path = field(default=None)  # Hailo HEF path
-    detection_confidence_threshold: float = _detection.get("confidence_threshold", 0.4)
-    bird_class_id: int = _detection.get("bird_class_id", 14)
+    detection_confidence_threshold: float = _bird_detection.get("confidence_threshold", 0.4)
+    bird_class_id: int = _bird_detection.get("bird_class_id", 14)
 
-    # Classification (fine-tuned species classifier)
+    # Daytime: Species Classification (Stage 2 — EfficientNet classifies species)
     classifier_model_path: Path = field(default=None)  # Hailo HEF path
-    classification_confidence_threshold: float = _classification.get("confidence_threshold", 0.10)
+    classification_confidence_threshold: float = _species_classification.get("confidence_threshold", 0.30)
     num_species: int = 555  # NABirds dataset
 
-    # Wildlife detection (nighttime)
-    wildlife_model: str = _wildlife.get("model", "")
+    # Nighttime: Wildlife Detection (single-stage YOLO)
+    wildlife_model: str = _wildlife_detection.get("model", "")
     wildlife_model_path: Path = field(default=None)  # Hailo HEF path
-    wildlife_confidence_threshold: float = _wildlife.get("confidence_threshold", 0.4)
+    wildlife_confidence_threshold: float = _wildlife_detection.get("confidence_threshold", 0.4)
     wildlife_class_names: dict[int, str] = field(default_factory=lambda: {
         0: "bird", 1: "bobcat", 2: "coyote", 3: "raccoon", 4: "rabbit",
         5: "skunk", 6: "opossum", 7: "squirrel", 8: "armadillo", 9: "cat", 10: "dog",

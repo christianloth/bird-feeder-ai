@@ -237,7 +237,7 @@ class BirdPipeline:
                 f"Classification: {species_name} ({conf:.2f}) in {cls_ms:.1f}ms"
             )
 
-            if species_name is None:
+            if species_name is None or conf < settings.classification_confidence_threshold:
                 continue
 
             self.tracker.mark_classified(track.track_id, species_name, conf)
@@ -433,6 +433,7 @@ class BirdPipeline:
         self,
         video_path: str | Path,
         process_every_n: int | None = None,
+        output_video: str | Path | None = None,
     ) -> list[dict]:
         """
         Run the pipeline on a video file.
@@ -445,6 +446,8 @@ class BirdPipeline:
             video_path: Path to a video file (mp4, avi, etc.).
             process_every_n: Process every Nth frame. If None, uses the
                 pipeline's configured FrameSkipper value.
+            output_video: If set, write an annotated video with bounding boxes,
+                class labels, and confidence scores to this path.
 
         Returns:
             List of all detections across the video.
@@ -471,6 +474,17 @@ class BirdPipeline:
         logger.info(f"  Resolution: {width}x{height}, FPS: {fps:.0f}, "
                      f"Duration: {duration:.1f}s, Frames: {total_frames}")
 
+        # Set up output video writer if requested
+        video_writer = None
+        if output_video:
+            output_video = Path(output_video)
+            output_video.parent.mkdir(parents=True, exist_ok=True)
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            video_writer = cv2.VideoWriter(
+                str(output_video), fourcc, fps, (width, height),
+            )
+            logger.info(f"  Output video: {output_video}")
+
         if self.save_enabled:
             self._init_database()
         self.tracker = BirdTracker(min_frames_for_detection=1)
@@ -479,6 +493,8 @@ class BirdPipeline:
         all_detections = []
         frame_num = 0
         frames_processed = 0
+        # Track active detections for drawing on non-processed frames
+        active_boxes: list[dict] = []
         t_start = time.time()
 
         while cap.isOpened():
@@ -486,32 +502,64 @@ class BirdPipeline:
             if not ret:
                 break
 
-            if frame_num % skip != 0:
-                frame_num += 1
-                continue
+            if frame_num % skip == 0:
+                timestamp = frame_num / fps
 
-            timestamp = frame_num / fps
+                try:
+                    detections = self.process_frame(frame, timestamp)
+                except Exception as e:
+                    logger.error(f"Frame {frame_num} failed: {e}")
+                    frame_num += 1
+                    continue
 
-            try:
-                detections = self.process_frame(frame, timestamp)
-            except Exception as e:
-                logger.error(f"Frame {frame_num} failed: {e}")
-                frame_num += 1
-                continue
+                # Update active boxes for video annotation
+                active_boxes = detections
 
-            for det in detections:
-                det["frame_num"] = frame_num
-                det["video_time"] = f"{timestamp:.1f}s"
-                all_detections.append(det)
-                logger.info(
-                    f"  [{timestamp:.1f}s] {det['species']} "
-                    f"({det['confidence']:.2f}) track={det['track_id']}"
-                )
+                for det in detections:
+                    det["frame_num"] = frame_num
+                    det["video_time"] = f"{timestamp:.1f}s"
+                    all_detections.append(det)
+                    logger.info(
+                        f"  [{timestamp:.1f}s] {det['species']} "
+                        f"({det['confidence']:.2f}) track={det['track_id']}"
+                    )
 
-            frames_processed += 1
+                frames_processed += 1
+
+            # Draw bounding boxes on every frame for smooth output video
+            if video_writer:
+                annotated = frame.copy()
+                for det in active_boxes:
+                    x1, y1, x2, y2 = det["bbox"]
+                    conf = det["confidence"]
+                    label = f"{det['species']} {conf:.2f}"
+
+                    # Draw box
+                    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+                    # Draw label background
+                    (tw, th), _ = cv2.getTextSize(
+                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1,
+                    )
+                    cv2.rectangle(
+                        annotated, (x1, y1 - th - 8), (x1 + tw + 4, y1),
+                        (0, 0, 255), -1,
+                    )
+                    # Draw label text
+                    cv2.putText(
+                        annotated, label, (x1 + 2, y1 - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+                        cv2.LINE_AA,
+                    )
+                video_writer.write(annotated)
+
             frame_num += 1
 
         cap.release()
+        if video_writer:
+            video_writer.release()
+            logger.info(f"Output video saved: {output_video}")
+
         elapsed = time.time() - t_start
 
         logger.info(
@@ -712,6 +760,11 @@ if __name__ == "__main__":
         help="Disable saving detections to database and disk (log only)",
     )
     parser.add_argument(
+        "--output-video", nargs="?", const="auto", default=None,
+        help="Write annotated video with bounding boxes (only with --video). "
+             "Optionally specify a path; defaults to output_inference_videos/",
+    )
+    parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
@@ -741,6 +794,16 @@ if __name__ == "__main__":
             save_enabled=not args.no_save,
         )
 
+    if args.output_video and not args.video:
+        parser.error("--output-video requires --video")
+
+    # Resolve --output-video default path
+    if args.output_video == "auto" and args.video:
+        output_dir = settings.project_root / "output_inference_videos"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        input_stem = Path(args.video).stem
+        args.output_video = str(output_dir / f"{input_stem}_annotated.mp4")
+
     if args.image:
         results = pipeline.run_on_image(args.image)
         if results:
@@ -750,7 +813,9 @@ if __name__ == "__main__":
             print("No birds detected.")
     elif args.video:
         results = pipeline.run_on_video(
-            args.video, process_every_n=args.process_every_n,
+            args.video,
+            process_every_n=args.process_every_n,
+            output_video=args.output_video,
         )
         if results:
             print(f"\n{'='*60}")

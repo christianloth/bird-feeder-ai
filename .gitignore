@@ -40,6 +40,9 @@ config/camera.yaml
 # Saved images
 detections/
 
+# Annotated inference output videos
+output_inference_videos/
+
 # Environment
 .env
 /data/
