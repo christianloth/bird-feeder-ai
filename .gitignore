@@ -50,3 +50,4 @@ output_inference_videos/
 # Wildlife training datasets
 data/
 *.log
+/.browser-sessions/

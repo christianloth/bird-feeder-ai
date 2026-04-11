@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bird Feeder AI - Review Detections</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1117;
+            color: #e1e4e8;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        header {
+            width: 100%;
+            max-width: 800px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        header h1 { font-size: 1.5rem; color: #58a6ff; margin-bottom: 8px; }
+        .progress-bar {
+            background: #21262d;
+            border-radius: 8px;
+            height: 8px;
+            width: 100%;
+            overflow: hidden;
+        }
+        .progress-fill {
+            background: #3fb950;
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        .stats { font-size: 0.85rem; color: #8b949e; margin-top: 6px; }
+        .shortcuts {
+            font-size: 0.75rem;
+            color: #6e7681;
+            margin-top: 12px;
+            background: #161b22;
+            padding: 10px 16px;
+            border-radius: 8px;
+        }
+        .shortcuts kbd {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #e1e4e8;
+        }
+        #review-area {
+            width: 100%;
+            max-width: 800px;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        .card.empty { padding: 60px 20px; }
+        .card.empty h2 { color: #3fb950; margin-bottom: 8px; }
+        .detection-image {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 2px solid #30363d;
+        }
+        .prediction {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .confidence {
+            font-size: 1rem;
+            margin-bottom: 16px;
+        }
+        .confidence .value { font-weight: 600; }
+        .confidence .high { color: #3fb950; }
+        .confidence .medium { color: #d29922; }
+        .confidence .low { color: #f85149; }
+        .meta { font-size: 0.8rem; color: #8b949e; margin-bottom: 16px; }
+        .actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn:hover { transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+        .btn-confirm { background: #238636; color: white; }
+        .btn-confirm:hover { background: #2ea043; }
+        .btn-reject { background: #da3633; color: white; }
+        .btn-reject:hover { background: #f85149; }
+        .btn-correct { background: #1f6feb; color: white; }
+        .btn-correct:hover { background: #388bfd; }
+        .correct-panel {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            background: #0d1117;
+            border-radius: 8px;
+        }
+        .correct-panel.active { display: block; }
+        .correct-panel input {
+            width: 100%;
+            padding: 8px 12px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #e1e4e8;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+        .correct-panel input:focus { outline: none; border-color: #58a6ff; }
+        .species-list {
+            max-height: 200px;
+            overflow-y: auto;
+            text-align: left;
+        }
+        .species-option {
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .species-option:hover { background: #21262d; }
+        .htmx-request .btn { opacity: 0.5; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Detection Review</h1>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress"
+                 style="width: {{ (reviewed / total * 100) if total > 0 else 0 }}%"></div>
+        </div>
+        <div class="stats" id="stats">
+            {{ reviewed }} reviewed / {{ total }} total ({{ pending }} pending)
+        </div>
+        <div class="shortcuts">
+            <kbd>A</kbd> Confirm &nbsp;
+            <kbd>X</kbd> False Positive &nbsp;
+            <kbd>C</kbd> Correct Species &nbsp;
+            <kbd>Esc</kbd> Cancel Correction
+        </div>
+    </header>
+
+    <div id="review-area"
+         hx-get="/api/review/next"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+        <div class="card">Loading...</div>
+    </div>
+
+    <script>
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Don't trigger shortcuts when typing in the search input
+            if (e.target.tagName === 'INPUT') {
+                if (e.key === 'Escape') {
+                    e.target.blur();
+                    document.querySelector('.correct-panel')?.classList.remove('active');
+                }
+                return;
+            }
+
+            const confirmBtn = document.querySelector('.btn-confirm');
+            const rejectBtn = document.querySelector('.btn-reject');
+
+            if ((e.key === 'a' || e.key === 'A' || e.key === 'Enter') && confirmBtn) {
+                e.preventDefault();
+                confirmBtn.click();
+            } else if ((e.key === 'x' || e.key === 'X') && rejectBtn) {
+                e.preventDefault();
+                rejectBtn.click();
+            } else if (e.key === 'c' || e.key === 'C') {
+                e.preventDefault();
+                const panel = document.querySelector('.correct-panel');
+                if (panel) {
+                    panel.classList.toggle('active');
+                    if (panel.classList.contains('active')) {
+                        panel.querySelector('input')?.focus();
+                    }
+                }
+            } else if (e.key === 'Escape') {
+                document.querySelector('.correct-panel')?.classList.remove('active');
+            }
+        });
+
+        // Species search filter
+        document.addEventListener('input', function(e) {
+            if (e.target.id === 'species-search') {
+                const query = e.target.value.toLowerCase();
+                document.querySelectorAll('.species-option').forEach(function(opt) {
+                    const name = opt.textContent.toLowerCase();
+                    opt.style.display = name.includes(query) ? 'block' : 'none';
+                });
+            }
+        });
+    </script>
+</body>
+</html>

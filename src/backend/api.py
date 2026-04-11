@@ -10,7 +10,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from pathlib import Path as _Path
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, Response
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
@@ -78,6 +82,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_TEMPLATE_DIR = _Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
 
 def get_db() -> Session:
     """Dependency that provides a database session."""
@@ -93,12 +100,14 @@ SessionDep = Annotated[Session, Depends(get_db)]
 
 # --- Health ---
 
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
 
 # --- Detections ---
+
 
 @app.get("/api/detections", response_model=list[DetectionResponse])
 def list_detections(
@@ -187,6 +196,7 @@ def review_detection(
 
 # --- Stats ---
 
+
 @app.get("/api/stats", response_model=DetectionStats)
 def get_stats(session: SessionDep):
     """Get overall detection statistics."""
@@ -210,9 +220,7 @@ def get_stats(session: SessionDep):
     # Today's count
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_count = (
-        session.query(func.count(Detection.id))
-        .filter(Detection.timestamp >= today_start)
-        .scalar()
+        session.query(func.count(Detection.id)).filter(Detection.timestamp >= today_start).scalar()
         or 0
     )
 
@@ -288,6 +296,7 @@ def get_hourly_stats(
 
 # --- Species ---
 
+
 @app.get("/api/species", response_model=list[SpeciesResponse])
 def list_species(
     session: SessionDep,
@@ -310,6 +319,7 @@ def get_species(species_id: int, session: SessionDep):
 
 # --- Weather ---
 
+
 @app.get("/api/weather/current", response_model=WeatherResponse)
 def get_current_weather():
     """Get current weather conditions at the feeder location."""
@@ -321,6 +331,7 @@ def get_current_weather():
 
 
 # --- Daily Summaries ---
+
 
 @app.get("/api/daily", response_model=list[DailySummaryResponse])
 def get_daily_summaries(
@@ -338,7 +349,170 @@ def get_daily_summaries(
     return summaries
 
 
+# --- Detection Images ---
+
+
+@app.get("/api/detections/{detection_id}/crop")
+def get_detection_crop(detection_id: int, session: SessionDep):
+    """Serve the cropped detection image on-the-fly from the saved frame + bbox."""
+    from io import BytesIO
+
+    detection = session.get(Detection, detection_id)
+    if not detection:
+        raise HTTPException(status_code=404, detail="Detection not found")
+    if not detection.frame_path:
+        raise HTTPException(status_code=404, detail="No frame image for this detection")
+
+    frame_path = _image_storage.get_absolute_path(detection.frame_path)
+    if not frame_path.exists():
+        raise HTTPException(status_code=404, detail="Frame image file not found on disk")
+
+    if not all(
+        v is not None
+        for v in [
+            detection.bbox_x1,
+            detection.bbox_y1,
+            detection.bbox_x2,
+            detection.bbox_y2,
+        ]
+    ):
+        raise HTTPException(status_code=400, detail="Detection missing bbox coordinates")
+
+    crop = ImageStorage.crop_from_frame(
+        frame_path,
+        (detection.bbox_x1, detection.bbox_y1, detection.bbox_x2, detection.bbox_y2),
+    )
+
+    buf = BytesIO()
+    crop.save(buf, format="JPEG", quality=90)
+    buf.seek(0)
+    return Response(content=buf.read(), media_type="image/jpeg")
+
+
+@app.get("/api/detections/{detection_id}/frame")
+def get_detection_frame(detection_id: int, session: SessionDep):
+    """Serve the full frame image for a detection."""
+    detection = session.get(Detection, detection_id)
+    if not detection:
+        raise HTTPException(status_code=404, detail="Detection not found")
+    if not detection.frame_path:
+        raise HTTPException(status_code=404, detail="No frame image for this detection")
+
+    frame_path = _image_storage.get_absolute_path(detection.frame_path)
+    if not frame_path.exists():
+        raise HTTPException(status_code=404, detail="Frame image file not found on disk")
+
+    return Response(
+        content=frame_path.read_bytes(),
+        media_type="image/jpeg",
+    )
+
+
+# --- Review UI ---
+
+
+@app.get("/review", response_class=HTMLResponse)
+def review_page(request: Request, session: SessionDep):
+    """Serve the detection review UI."""
+    # Count pending reviews
+    pending = (
+        session.query(func.count(Detection.id)).filter(Detection.reviewed.is_(False)).scalar() or 0
+    )
+    total = session.query(func.count(Detection.id)).scalar() or 0
+    reviewed = total - pending
+
+    return templates.TemplateResponse(
+        request=request,
+        name="review.html",
+        context={"pending": pending, "reviewed": reviewed, "total": total},
+    )
+
+
+@app.get("/api/review/next", response_class=HTMLResponse)
+def review_next_card(request: Request, session: SessionDep):
+    """Return the next unreviewed detection as an HTMX card fragment."""
+    detection = (
+        session.query(Detection)
+        .filter(Detection.reviewed.is_(False))
+        .order_by(desc(Detection.confidence))
+        .first()
+    )
+
+    if not detection:
+        return HTMLResponse(
+            '<div id="review-card" class="card empty">'
+            "<h2>All done!</h2><p>No more detections to review.</p>"
+            "</div>"
+        )
+
+    species_name = detection.species.common_name if detection.species else "Unknown"
+
+    # Get species list for correction dropdown (limited to likely species)
+    species_list = session.query(Species).order_by(Species.common_name).all()
+
+    # Count remaining
+    pending = (
+        session.query(func.count(Detection.id)).filter(Detection.reviewed.is_(False)).scalar() or 0
+    )
+    total = session.query(func.count(Detection.id)).scalar() or 0
+
+    return templates.TemplateResponse(
+        request=request,
+        name="review_card.html",
+        context={
+            "detection": detection,
+            "species_name": species_name,
+            "species_list": species_list,
+            "pending": pending,
+            "total": total,
+        },
+    )
+
+
+@app.post("/api/review/{detection_id}/confirm", response_class=HTMLResponse)
+def review_confirm(detection_id: int, request: Request, session: SessionDep):
+    """Confirm a detection as correct and return the next card."""
+    detection = session.get(Detection, detection_id)
+    if detection:
+        detection.reviewed = True
+        detection.is_false_positive = False
+        session.commit()
+    return review_next_card(request, session)
+
+
+@app.post("/api/review/{detection_id}/reject", response_class=HTMLResponse)
+def review_reject(detection_id: int, request: Request, session: SessionDep):
+    """Mark a detection as false positive and return the next card."""
+    detection = session.get(Detection, detection_id)
+    if detection:
+        detection.reviewed = True
+        detection.is_false_positive = True
+        session.commit()
+    return review_next_card(request, session)
+
+
+@app.post("/api/review/{detection_id}/correct/{species_id}", response_class=HTMLResponse)
+def review_correct(
+    detection_id: int,
+    species_id: int,
+    request: Request,
+    session: SessionDep,
+):
+    """Correct the species and return the next card."""
+    detection = session.get(Detection, detection_id)
+    if detection:
+        corrected = session.get(Species, species_id)
+        if not corrected:
+            raise HTTPException(status_code=404, detail="Species not found")
+        detection.reviewed = True
+        detection.is_false_positive = False
+        detection.corrected_species_id = species_id
+        session.commit()
+    return review_next_card(request, session)
+
+
 # --- System ---
+
 
 @app.get("/api/system/status", response_model=SystemStatus)
 def get_system_status(session: SessionDep):

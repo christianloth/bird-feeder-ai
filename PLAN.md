@@ -7,7 +7,7 @@ A 24/7 bird species detection and tracking system using a Raspberry Pi 5 + AI HA
 - Raspberry Pi 5
 - Raspberry Pi AI HAT+ 2 (Hailo-10H, 40 TOPS)
 - SV3C 4K PTZ WiFi Camera (RTSP stream)
-- NVMe SSD for storage (recommended over SD card for 24/7 writes)
+- SanDisk MAX Endurance 128GB microSDXC (SDSQQVR-128G-GN6IA) for OS + storage
 - Optional: USB microphone for BirdNET audio classification
 
 ## Architecture
@@ -25,7 +25,7 @@ SV3C Camera (RTSP 1080p)
        |
 [FastAPI Backend]
   ├── SQLite Database (detections, species, weather)
-  ├── Image Storage (crops + thumbnails on NVMe)
+  ├── Image Storage (crops + thumbnails on SD card)
   ├── Open-Meteo Weather Correlation
   └── REST API (for future dashboard)
 ```
