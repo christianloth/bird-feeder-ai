@@ -96,6 +96,9 @@ class BirdPipeline:
         self._running = False
         self._total_detections = 0
         self._session_factory = None
+        # Species cooldown: suppress duplicate DB saves of the same species
+        # within N seconds. One bird visit = one database record.
+        self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
 
     def _init_database(self):
         """Initialize database tables and species lookup."""
@@ -129,7 +132,22 @@ class BirdPipeline:
         classifier_model: str = "mobilenetv2_nabirds",
         source: str = "rtsp",
     ):
-        """Save a detection to storage and database."""
+        """Save a detection to storage and database, with species cooldown."""
+        # Species cooldown: skip if we recently saved the same species.
+        # This prevents one bird sitting on the feeder from generating 40
+        # database records due to tracker fragmentation.
+        cooldown = settings.species_cooldown_seconds
+        ts_float = timestamp.timestamp()
+        if species_name in self._species_cooldown:
+            elapsed = ts_float - self._species_cooldown[species_name]
+            if elapsed < cooldown:
+                logger.debug(
+                    f"Cooldown active for {species_name} "
+                    f"({elapsed:.0f}s < {cooldown}s), skipping save"
+                )
+                return
+        self._species_cooldown[species_name] = ts_float
+
         try:
             paths = self.storage.save_detection(
                 frame=frame,
@@ -216,59 +234,94 @@ class BirdPipeline:
     def _process_frame_day(
         self, frame: np.ndarray, timestamp: float,
     ) -> list[dict]:
-        """Daytime path: bird detection + species classification."""
+        """
+        Daytime path: bird detection + species classification with logit averaging.
+
+        Instead of classifying a bird once and dropping it if confidence is low,
+        we classify on every processed frame and accumulate raw logits. Averaging
+        logits before softmax produces better predictions than any single frame
+        because consistent signal accumulates while per-frame noise cancels out.
+
+        The track is reclassified each frame until confidence crosses the threshold,
+        at which point it's locked in and saved to the database (RTSP mode only).
+        """
         new_detections = []
 
-        # 1. Detect birds
+        # 1. Detect birds (YOLO — "is there a bird?")
         t0 = time.perf_counter()
         bboxes, confidences = self.detector.detect(frame)
         det_ms = (time.perf_counter() - t0) * 1000
         logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms")
 
-        # 2. Update tracker
-        new_tracks = self.tracker.update(bboxes, timestamp)
+        # 2. Update tracker — returns all active tracks not yet confidently
+        #    classified (both new tracks and existing ones being retried)
+        tracks_to_classify = self.tracker.update(bboxes, confidences, timestamp)
 
-        # 3. Classify new tracks
-        for track in new_tracks:
+        # 3. Classify each track using logit averaging
+        for track in tracks_to_classify:
             crop = crop_bird_roi(frame, track.bbox)
             if crop.size == 0:
                 logger.warning(f"Empty crop for track {track.track_id}, skipping")
                 continue
 
+            # Get raw logits (pre-softmax scores) for this frame's crop
             t0 = time.perf_counter()
-            species_name, conf = self.classifier.predict(crop)
+            logits = self.classifier.predict_logits(crop)
             cls_ms = (time.perf_counter() - t0) * 1000
-            logger.debug(
-                f"Classification: {species_name} ({conf:.2f}) in {cls_ms:.1f}ms"
+
+            # Average logits across all frames seen so far, then softmax.
+            # This is more accurate than taking the max probability from any
+            # single frame (Dussert et al. 2025).
+            if track.logit_sum is not None:
+                avg_logits = (track.logit_sum + logits) / (track.classify_count + 1)
+            else:
+                avg_logits = logits
+            exp_logits = np.exp(avg_logits - np.max(avg_logits))
+            probs = exp_logits / exp_logits.sum()
+            class_idx = int(np.argmax(probs))
+            conf = float(probs[class_idx])
+            species_name = self.classifier.class_names.get(class_idx, f"class_{class_idx}")
+
+            # Add this frame's logits to the track's running sum
+            self.tracker.accumulate_logits(
+                track.track_id, logits, species_name, conf,
             )
 
-            if species_name is None or conf < settings.classification_confidence_threshold:
-                continue
+            logger.debug(
+                f"Classification: {species_name} ({conf:.2f}) in {cls_ms:.1f}ms "
+                f"[attempt {track.classify_count}, avg of {track.classify_count}]"
+            )
 
-            self.tracker.mark_classified(track.track_id, species_name, conf)
-
-            dt = datetime.fromtimestamp(timestamp)
-            if self.save_enabled and self._session_factory and settings.save_crops:
-                self._save_detection(
-                    frame, track.bbox, species_name, conf, dt,
-                    detection_model=Path(settings.detection_model).stem,
-                    classifier_model="efficientnet_b2_nabirds",
-                    source=self._source,
+            # Check if we've crossed the confidence threshold
+            if conf >= settings.classification_confidence_threshold:
+                self.tracker.mark_classified(track.track_id, species_name, conf)
+                logger.debug(
+                    f"Track {track.track_id} confidently classified: "
+                    f"{species_name} ({conf:.2f}) after {track.classify_count} frames"
                 )
 
-            new_detections.append({
-                "species": species_name,
-                "confidence": conf,
-                "bbox": track.bbox,
-                "track_id": track.track_id,
-            })
+                dt = datetime.fromtimestamp(timestamp)
+                if self.save_enabled and self._session_factory and settings.save_crops:
+                    self._save_detection(
+                        frame, track.bbox, species_name, conf, dt,
+                        detection_model=Path(settings.detection_model).stem,
+                        classifier_model="efficientnet_b2_nabirds",
+                        source=self._source,
+                    )
+
+                new_detections.append({
+                    "species": species_name,
+                    "confidence": conf,
+                    "bbox": track.bbox,
+                    "track_id": track.track_id,
+                })
 
         return new_detections
 
     def _process_frame_night(
         self, frame: np.ndarray, timestamp: float,
     ) -> list[dict]:
-        """Nighttime path: wildlife detection (class comes from YOLO directly)."""
+        """Nighttime path: wildlife detection with best-of-N retry."""
         new_detections = []
 
         # 1. Detect wildlife -- returns class names directly
@@ -278,12 +331,13 @@ class BirdPipeline:
         logger.debug(f"Wildlife detection: {len(wildlife_dets)} animals in {det_ms:.1f}ms")
 
         bboxes = [d.bbox for d in wildlife_dets]
+        wildlife_confs = [d.confidence for d in wildlife_dets]
 
-        # 2. Update tracker
-        new_tracks = self.tracker.update(bboxes, timestamp)
+        # 2. Update tracker — returns all unclassified tracks
+        tracks_to_classify = self.tracker.update(bboxes, wildlife_confs, timestamp)
 
-        # 3. Match new tracks to their wildlife detections
-        for track in new_tracks:
+        # 3. Match tracks to their wildlife detections (best-of-N: keep highest conf)
+        for track in tracks_to_classify:
             matched_det = None
             for wd in wildlife_dets:
                 if wd.bbox == track.bbox:
@@ -297,23 +351,34 @@ class BirdPipeline:
             species_name = matched_det.class_name
             conf = matched_det.confidence
 
-            self.tracker.mark_classified(track.track_id, species_name, conf)
+            # Keep the best confidence seen across frames
+            if conf > track.confidence:
+                track.species = species_name
+                track.confidence = conf
+            track.classify_count += 1
 
-            dt = datetime.fromtimestamp(timestamp)
-            if self.save_enabled and self._session_factory and settings.save_crops:
-                self._save_detection(
-                    frame, track.bbox, species_name, conf, dt,
-                    detection_model=Path(settings.wildlife_model).parent.parent.name,
-                    classifier_model=Path(settings.wildlife_model).parent.parent.name,
-                    source=self._source,
-                )
+            # Check if we've crossed the threshold
+            if track.confidence >= settings.wildlife_confidence_threshold:
+                if not track.classified:
+                    self.tracker.mark_classified(
+                        track.track_id, track.species, track.confidence,
+                    )
 
-            new_detections.append({
-                "species": species_name,
-                "confidence": conf,
-                "bbox": track.bbox,
-                "track_id": track.track_id,
-            })
+                    dt = datetime.fromtimestamp(timestamp)
+                    if self.save_enabled and self._session_factory and settings.save_crops:
+                        self._save_detection(
+                            frame, track.bbox, track.species, track.confidence, dt,
+                            detection_model=Path(settings.wildlife_model).parent.parent.name,
+                            classifier_model=Path(settings.wildlife_model).parent.parent.name,
+                            source=self._source,
+                        )
+
+                    new_detections.append({
+                        "species": track.species,
+                        "confidence": track.confidence,
+                        "bbox": track.bbox,
+                        "track_id": track.track_id,
+                    })
 
         return new_detections
 
@@ -469,13 +534,16 @@ class BirdPipeline:
         video_path: str | Path,
         process_every_n: int | None = None,
         output: str | Path | None = None,
+        virtual_rtsp: bool = False,
     ) -> list[dict]:
         """
         Run the pipeline on a video file.
 
         Processes frames through the full pipeline (detect → track → classify)
-        and logs detections. No database or image storage — use --output to
-        save an annotated video with bounding boxes.
+        and logs detections. Use --output to save an annotated video.
+
+        With virtual_rtsp=True, the video is treated exactly like an RTSP
+        stream: saves to database, uses min_frames=3, applies species cooldown.
 
         Args:
             video_path: Path to a video file (mp4, avi, etc.).
@@ -483,6 +551,7 @@ class BirdPipeline:
                 pipeline's configured FrameSkipper value.
             output: If set, write an annotated video with bounding boxes,
                 class labels, and confidence scores to this path.
+            virtual_rtsp: If True, treat as RTSP (save to DB, min_frames=3).
 
         Returns:
             List of all detections across the video.
@@ -503,9 +572,12 @@ class BirdPipeline:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         duration = total_frames / fps
 
-        self._source = "video"
+        self._source = "rtsp" if virtual_rtsp else "video"
         self._log_pipeline_config()
-        logger.info(f"Processing video: {video_path.name}")
+        if virtual_rtsp:
+            logger.info(f"Processing video (virtual RTSP): {video_path.name}")
+        else:
+            logger.info(f"Processing video: {video_path.name}")
         logger.info(f"  Resolution: {width}x{height}, FPS: {fps:.0f}, "
                      f"Duration: {duration:.1f}s, Frames: {total_frames}")
 
@@ -520,14 +592,18 @@ class BirdPipeline:
             )
             logger.info(f"  Output video: {output}")
 
-        self.tracker = BirdTracker(min_frames_for_detection=1)
+        if virtual_rtsp:
+            # Use RTSP defaults: require 3 frames before accepting a track
+            if self.save_enabled:
+                self._init_database()
+            self.tracker = BirdTracker(min_frames_for_detection=3)
+        else:
+            self.tracker = BirdTracker(min_frames_for_detection=1)
 
         skip = process_every_n or self.skipper.process_every_n
         all_detections = []
         frame_num = 0
         frames_processed = 0
-        # Track active detections for drawing on non-processed frames
-        active_boxes: list[dict] = []
         t_start = time.time()
 
         while cap.isOpened():
@@ -545,18 +621,6 @@ class BirdPipeline:
                     frame_num += 1
                     continue
 
-                # Update active boxes from all classified tracks (not just new ones)
-                active_boxes = [
-                    {
-                        "species": t.species,
-                        "confidence": t.confidence,
-                        "bbox": t.bbox,
-                        "track_id": t.track_id,
-                    }
-                    for t in self.tracker.active_tracks
-                    if t.classified
-                ]
-
                 for det in detections:
                     det["frame_num"] = frame_num
                     det["video_time"] = f"{timestamp:.1f}s"
@@ -568,8 +632,11 @@ class BirdPipeline:
 
                 frames_processed += 1
 
-            # Draw bounding boxes on every frame for smooth output video
+            # Draw bounding boxes on every frame for smooth output video.
+            # Use Kalman-predicted positions so boxes move smoothly even on
+            # frames where YOLO didn't detect the bird.
             if video_writer:
+                active_boxes = self.tracker.get_predicted_boxes()
                 annotated = frame.copy()
                 for det in active_boxes:
                     x1, y1, x2, y2 = det["bbox"]
@@ -795,7 +862,24 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--no-night", action="store_true",
-        help="Disable night mode (wildlife detection) switching",
+        help="Disable night mode entirely (no wildlife detector loaded)",
+    )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--day", action="store_true",
+        help="Force daytime mode (bird detection + species classification). "
+             "Default for --image/--video. Can override RTSP auto-detection.",
+    )
+    mode_group.add_argument(
+        "--night", action="store_true",
+        help="Force nighttime mode (wildlife detection). "
+             "Can override RTSP auto-detection or image/video default.",
+    )
+    parser.add_argument(
+        "--virtual-rtsp", action="store_true",
+        help="Treat --video as if it were an RTSP stream: save to database, "
+             "use min_frames=3, apply species cooldown. For testing the full "
+             "RTSP pipeline with a video file.",
     )
     parser.add_argument(
         "--no-save", action="store_true",
@@ -814,18 +898,29 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    import sys
+
     log_level = args.log_level or settings.log_level
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
     )
 
-    # Only RTSP mode saves to database/storage; image and video never do
+    # Only RTSP mode (and --virtual-rtsp) saves to database/storage
     is_offline = args.image or args.video
-    if args.no_save and is_offline:
+    virtual_rtsp = args.virtual_rtsp
+    if virtual_rtsp and not args.video:
+        parser.error("--virtual-rtsp requires --video")
+    if args.no_save and is_offline and not virtual_rtsp:
         parser.error("--no-save is only for RTSP mode (image/video never save to database)")
-    save_enabled = False if is_offline else not args.no_save
+    if virtual_rtsp:
+        save_enabled = not args.no_save
+    elif is_offline:
+        save_enabled = False
+    else:
+        save_enabled = not args.no_save
 
     if args.mode == "dev":
         pipeline = create_pipeline_dev(
@@ -841,6 +936,25 @@ if __name__ == "__main__":
             enable_night_mode=not args.no_night,
             save_enabled=save_enabled,
         )
+
+    # Apply day/night mode override.
+    # Offline (image/video) defaults to day mode unless --night is specified.
+    # RTSP uses auto-detection from sunrise/sunset unless overridden.
+    if args.day:
+        # Force daytime: disable the mode manager so _is_night_mode is always False
+        pipeline.mode_manager = None
+    elif args.night:
+        # Force nighttime: set mode manager to night and disable auto-updates
+        if pipeline.mode_manager and pipeline.wildlife_detector:
+            from src.pipeline.mode_manager import PipelineMode
+            pipeline.mode_manager.force_mode(PipelineMode.NIGHT)
+            pipeline.mode_manager.update = lambda: False  # disable time-based switching
+        else:
+            parser.error("--night requires night mode components (use without --no-night)")
+    elif is_offline and not virtual_rtsp:
+        # Default to daytime for image/video inference
+        # (virtual-rtsp uses auto-detection like real RTSP)
+        pipeline.mode_manager = None
 
     if args.output and not is_offline:
         parser.error("--output requires --video or --image")
@@ -885,6 +999,7 @@ if __name__ == "__main__":
                 video_file,
                 process_every_n=args.process_every_n,
                 output=output_path,
+                virtual_rtsp=virtual_rtsp,
             )
             if results:
                 print(f"\n{'='*60}")

@@ -741,3 +741,20 @@ def run_cleanup():
     """Manually trigger old image cleanup."""
     deleted = _image_storage.cleanup_old_images()
     return {"deleted_files": deleted}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Override uvicorn's default handlers to use stdout instead of stderr
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_config["handlers"]["default"]["stream"] = "ext://sys.stdout"
+    log_config["handlers"]["access"]["stream"] = "ext://sys.stdout"
+
+    uvicorn.run(
+        "src.backend.api:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True,
+        log_config=log_config,
+    )

@@ -1,16 +1,32 @@
 """
-Bird tracking and ROI cropping.
+Bird tracking, ROI cropping, and multi-frame classification support.
 
-Handles extracting bird regions from detection bounding boxes and tracking
-individual birds across frames to avoid duplicate detections of the same
-bird sitting on the feeder.
+Uses Norfair's Kalman-filter + IOU-based tracker instead of simple centroid
+distance matching. This solves the "tracker fragmentation" problem where a bird
+moving on a swaying feeder jumps >80 pixels between processed frames and gets
+assigned a new track each time.
+
+The Kalman filter predicts where each bird should be on the next frame based on
+its velocity, so even when processing every 5th frame (167ms gaps at 30fps),
+the predicted bounding box still overlaps with the actual detection. This is
+what Frigate NVR uses via Norfair for its bird feeder integrations.
+
+Logit averaging is maintained per track: raw classifier logits accumulate across
+frames and are averaged before softmax for more accurate species predictions.
+(See Dussert et al. 2025: logit averaging outperforms max-pooling, majority
+voting, and probability averaging.)
+
+A track stays "unclassified" until the averaged confidence crosses the threshold,
+allowing the classifier to retry on each new frame with a fresh crop.
 """
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
+from norfair import Detection as NorfairDetection
+from norfair import Tracker as NorfairTracker
 
 logger = logging.getLogger(__name__)
 
@@ -23,144 +39,209 @@ class BirdTrack:
     centroid: tuple[float, float]
     first_seen: float
     last_seen: float
-    classified: bool = False
-    species: str | None = None
-    confidence: float = 0.0
-    frame_count: int = 1
+    # Classification state — supports multi-frame logit averaging:
+    # The classifier runs on each processed frame until confidence crosses
+    # the threshold. Raw logits are accumulated in logit_sum and averaged
+    # before softmax, which produces better predictions than any single frame.
+    classified: bool = False  # True = passed confidence threshold, stop retrying
+    species: str | None = None  # Current best species from averaged logits
+    confidence: float = 0.0  # Confidence from averaged logits (not single-frame)
+    frame_count: int = 0  # Number of frames this track has been detected
+    logit_sum: np.ndarray | None = None  # Running sum of raw logits across frames
+    classify_count: int = 0  # Number of frames classified so far
 
 
 class BirdTracker:
     """
-    Simple centroid-based tracker for birds at a feeder.
+    IOU + Kalman filter tracker for birds at a feeder, powered by Norfair.
 
-    Birds at a feeder tend to stay relatively still, so a simple distance-based
-    tracker works well. If a detection's centroid is within `max_distance` of
-    an existing track's centroid, it's considered the same bird.
+    Instead of simple centroid distance (which fails when a bird shifts >80px
+    between processed frames due to feeder sway or fast movement), this tracker:
 
-    This prevents logging the same bird 50 times while it sits on the feeder
-    for 30 seconds.
+    1. Predicts where each bird SHOULD be using a Kalman velocity model
+    2. Matches detections to predictions using bounding box IOU overlap
+    3. Maintains tracks through brief occlusions (hit_counter_max frames)
+    4. Requires initialization_delay frames before accepting a new track
+
+    This is the same approach used by Frigate NVR (the most popular open-source
+    NVR for bird feeder projects like WhosAtMyFeeder).
     """
 
     def __init__(
         self,
-        max_distance: float = 80.0,
-        max_missing_seconds: float = 5.0,
         min_frames_for_detection: int = 3,
+        hit_counter_max: int = 30,
     ):
         """
         Args:
-            max_distance: Max pixel distance between centroids to consider same bird.
-            max_missing_seconds: Remove track after this many seconds without a match.
-            min_frames_for_detection: Require this many consecutive frames before
-                considering it a real detection (filters out noise/false positives).
+            min_frames_for_detection: Require this many consecutive detections
+                before accepting a track (filters transient false positives).
+                Use 1 for video/image mode, 3 for RTSP.
+            hit_counter_max: Maximum number of update() calls a track survives
+                without a matching detection. At ~6 processed fps (every 5th
+                frame of 30fps), 30 = ~5 seconds of grace period.
         """
-        self.max_distance = max_distance
-        self.max_missing_seconds = max_missing_seconds
         self.min_frames_for_detection = min_frames_for_detection
+        self._hit_counter_max = hit_counter_max
 
+        # Norfair's initialization_delay is 0-indexed:
+        # delay=0 → accepted on first detection, delay=2 → needs 3 detections
+        self._init_delay = max(0, min_frames_for_detection - 1)
+
+        self._norfair = NorfairTracker(
+            distance_function="iou",
+            distance_threshold=0.7,  # 1-IOU: match if IOU > 0.3
+            hit_counter_max=hit_counter_max,
+            initialization_delay=self._init_delay,
+        )
+
+        # Our classification state, keyed by Norfair track ID
         self._tracks: dict[int, BirdTrack] = {}
-        self._next_id = 0
+        # Frame counter to distinguish current-frame detections from stale ones
+        self._frame_counter = 0
 
-    def _centroid(self, bbox: tuple[int, int, int, int]) -> tuple[float, float]:
+    @staticmethod
+    def _centroid(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
         """Calculate the center point of a bounding box."""
         x1, y1, x2, y2 = bbox
         return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
-    def _distance(self, p1: tuple[float, float], p2: tuple[float, float]) -> float:
-        """Euclidean distance between two points."""
-        return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
-
     def update(
         self,
-        detections: list[tuple[int, int, int, int]],
+        bboxes: list[tuple[int, int, int, int]],
+        confidences: list[float] | None = None,
         timestamp: float | None = None,
     ) -> list[BirdTrack]:
         """
         Update tracks with new detection bounding boxes.
 
         Args:
-            detections: List of bounding boxes [(x1, y1, x2, y2), ...]
+            bboxes: List of bounding boxes [(x1, y1, x2, y2), ...]
+            confidences: Detection confidence for each bbox (from YOLO).
+                If None, defaults to 1.0 for all.
             timestamp: Current time (defaults to time.time())
 
         Returns:
-            List of NEW tracks that have met the min_frames threshold
-            and haven't been classified yet. These should be sent to
-            the species classifier.
+            List of active tracks that need classification: all tracks that
+            were detected in the current frame and haven't been confidently
+            classified yet.
         """
         now = timestamp or time.time()
-        new_tracks_ready = []
+        self._frame_counter += 1
 
-        # Remove stale tracks
-        stale_ids = [
-            tid for tid, track in self._tracks.items()
-            if now - track.last_seen > self.max_missing_seconds
-        ]
-        for tid in stale_ids:
-            logger.debug(f"Track {tid} expired ({self._tracks[tid].species or 'unclassified'})")
+        if confidences is None:
+            confidences = [1.0] * len(bboxes)
+
+        # Convert YOLO detections to Norfair format.
+        # Norfair expects 2-point bboxes: [[x1,y1], [x2,y2]] with scores per point.
+        norfair_dets = []
+        for bbox, conf in zip(bboxes, confidences):
+            x1, y1, x2, y2 = bbox
+            det = NorfairDetection(
+                points=np.array([[x1, y1], [x2, y2]], dtype=float),
+                scores=np.array([conf, conf]),
+                data={"bbox": (x1, y1, x2, y2), "frame": self._frame_counter},
+            )
+            norfair_dets.append(det)
+
+        # Run Norfair's Kalman + IOU tracker
+        tracked_objects = self._norfair.update(detections=norfair_dets)
+
+        active_ids = set()
+        tracks_to_classify = []
+
+        for obj in tracked_objects:
+            tid = obj.id
+            active_ids.add(tid)
+
+            # Check if this object was matched to a detection in the current frame
+            # (vs being predicted by the Kalman filter with no matching detection)
+            detected_this_frame = (
+                obj.last_detection is not None
+                and obj.last_detection.data is not None
+                and obj.last_detection.data.get("frame") == self._frame_counter
+            )
+
+            # Get the bbox from the actual detection (not Kalman estimate)
+            if detected_this_frame:
+                bbox = obj.last_detection.data["bbox"]
+            elif tid in self._tracks:
+                bbox = self._tracks[tid].bbox  # keep last known position
+            else:
+                # Newly predicted object with no prior state — use Kalman estimate
+                est = obj.estimate.flatten().astype(int)
+                bbox = (int(est[0]), int(est[1]), int(est[2]), int(est[3]))
+
+            # Create or update our classification state
+            if tid not in self._tracks:
+                self._tracks[tid] = BirdTrack(
+                    track_id=tid,
+                    bbox=bbox,
+                    centroid=self._centroid(bbox),
+                    first_seen=now,
+                    last_seen=now,
+                    frame_count=0,
+                )
+                logger.debug(
+                    f"New track {tid} at centroid "
+                    f"({self._centroid(bbox)[0]:.0f}, {self._centroid(bbox)[1]:.0f})"
+                )
+
+            track = self._tracks[tid]
+            track.bbox = bbox
+            track.centroid = self._centroid(bbox)
+            track.last_seen = now
+            if detected_this_frame:
+                track.frame_count += 1
+
+            # Only classify tracks with a fresh detection (new crop to work with)
+            # that haven't been confidently classified yet
+            if detected_this_frame and not track.classified:
+                tracks_to_classify.append(track)
+
+        # Clean up tracks that Norfair has removed (expired / lost)
+        expired_ids = [tid for tid in self._tracks if tid not in active_ids]
+        for tid in expired_ids:
+            track = self._tracks[tid]
+            if track.species and not track.classified:
+                logger.debug(
+                    f"Track {tid} expired with best-effort: "
+                    f"{track.species} ({track.confidence:.2f}, "
+                    f"{track.classify_count} attempts)"
+                )
+            else:
+                logger.debug(
+                    f"Track {tid} expired "
+                    f"({track.species or 'unclassified'})"
+                )
             del self._tracks[tid]
 
-        # Match detections to existing tracks
-        unmatched_detections = list(range(len(detections)))
-        matched_track_ids = set()
+        return tracks_to_classify
 
-        for det_idx in list(unmatched_detections):
-            bbox = detections[det_idx]
-            centroid = self._centroid(bbox)
+    def accumulate_logits(
+        self,
+        track_id: int,
+        logits: np.ndarray,
+        species: str,
+        confidence: float,
+    ) -> None:
+        """
+        Add a frame's logits to a track's running sum.
 
-            best_track_id = None
-            best_distance = float("inf")
-
-            for tid, track in self._tracks.items():
-                if tid in matched_track_ids:
-                    continue
-                dist = self._distance(centroid, track.centroid)
-                if dist < self.max_distance and dist < best_distance:
-                    best_distance = dist
-                    best_track_id = tid
-
-            if best_track_id is not None:
-                # Update existing track
-                track = self._tracks[best_track_id]
-                track.bbox = bbox
-                track.centroid = centroid
-                track.last_seen = now
-                track.frame_count += 1
-                matched_track_ids.add(best_track_id)
-                unmatched_detections.remove(det_idx)
-
-                # Check if track just became ready for classification
-                if (
-                    track.frame_count == self.min_frames_for_detection
-                    and not track.classified
-                ):
-                    new_tracks_ready.append(track)
-
-        # Create new tracks for unmatched detections
-        for det_idx in unmatched_detections:
-            bbox = detections[det_idx]
-            centroid = self._centroid(bbox)
-            track = BirdTrack(
-                track_id=self._next_id,
-                bbox=bbox,
-                centroid=centroid,
-                first_seen=now,
-                last_seen=now,
-            )
-            self._tracks[self._next_id] = track
-            logger.debug(f"New track {self._next_id} at centroid ({centroid[0]:.0f}, {centroid[1]:.0f})")
-            self._next_id += 1
-
-            # If min_frames is 1, immediately ready
-            if self.min_frames_for_detection <= 1:
-                new_tracks_ready.append(track)
-
-        if len(self._tracks) > 20:
-            logger.warning(
-                f"High track count: {len(self._tracks)} active tracks "
-                "(possible false positive burst)"
-            )
-
-        return new_tracks_ready
+        Updates the track's best prediction from the averaged logits.
+        Does NOT mark as classified — call mark_classified separately
+        when the averaged confidence passes the threshold.
+        """
+        if track_id not in self._tracks:
+            return
+        track = self._tracks[track_id]
+        if track.logit_sum is None:
+            track.logit_sum = logits.copy()
+        else:
+            track.logit_sum += logits
+        track.classify_count += 1
+        track.species = species
+        track.confidence = confidence
 
     def mark_classified(
         self,
@@ -168,16 +249,58 @@ class BirdTracker:
         species: str,
         confidence: float,
     ) -> None:
-        """Mark a track as classified with species info."""
+        """Mark a track as confidently classified (stops reclassification)."""
         if track_id in self._tracks:
             self._tracks[track_id].classified = True
             self._tracks[track_id].species = species
             self._tracks[track_id].confidence = confidence
 
+    def get_predicted_boxes(self) -> list[dict]:
+        """
+        Get Kalman-predicted bounding boxes for all active tracked birds.
+
+        Used for smooth video annotation: on frames where YOLO doesn't detect
+        the bird (or on skipped frames), the Kalman filter still predicts where
+        the bird should be based on its velocity. This keeps the bounding box
+        moving smoothly instead of freezing at the last detection position.
+
+        Returns:
+            List of dicts with species, confidence, bbox, track_id for all
+            active tracks that have a species prediction.
+        """
+        boxes = []
+        for obj in self._norfair.tracked_objects:
+            tid = obj.id
+            if tid not in self._tracks:
+                continue
+            track = self._tracks[tid]
+            if track.species is None:
+                continue
+
+            # Use Norfair's Kalman-filtered estimate for the box position
+            est = obj.estimate.flatten().astype(int)
+            predicted_bbox = (int(est[0]), int(est[1]), int(est[2]), int(est[3]))
+
+            boxes.append({
+                "species": track.species,
+                "confidence": track.confidence,
+                "bbox": predicted_bbox,
+                "track_id": track.track_id,
+            })
+        return boxes
+
     def reset(self) -> None:
         """Clear all tracks. Used when switching between day/night modes."""
         count = len(self._tracks)
         self._tracks.clear()
+        # Recreate the Norfair tracker (no public reset API)
+        self._norfair = NorfairTracker(
+            distance_function="iou",
+            distance_threshold=0.7,
+            hit_counter_max=self._hit_counter_max,
+            initialization_delay=self._init_delay,
+        )
+        self._frame_counter = 0
         if count:
             logger.debug(f"Cleared {count} tracks")
 

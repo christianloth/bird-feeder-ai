@@ -136,10 +136,16 @@ Test on a single image:
 python -m src.pipeline.pipeline --mode dev --image path/to/bird.jpg
 ```
 
-Run inference on a video file (saves detections to database + `detections/` folder):
+Run inference on a video file (annotated output only, no database):
 
 ```bash
-python -m src.pipeline.pipeline --video path/to/video.mp4
+python -m src.pipeline.pipeline --video path/to/video.mp4 --output
+```
+
+Virtual RTSP — test the full RTSP pipeline (saves to database + `detections/rtsp/`) using a video file:
+
+```bash
+python -m src.pipeline.pipeline --video clip.mp4 --virtual-rtsp --day --output
 ```
 
 Process every 12th frame of a video (faster, skips redundant frames):

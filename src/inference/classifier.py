@@ -156,6 +156,13 @@ class BirdClassifier:
         tensor = self._transform(pil_image)
         return tensor
 
+    def _get_logits_pytorch(self, tensor: torch.Tensor) -> np.ndarray:
+        """Get raw logits from PyTorch backend."""
+        batch = tensor.unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            outputs = self._model(batch)
+        return outputs[0].cpu().numpy()
+
     def _predict_pytorch(self, tensor: torch.Tensor) -> tuple[int, float]:
         """Run inference with PyTorch backend."""
         batch = tensor.unsqueeze(0).to(self.device)
@@ -165,12 +172,16 @@ class BirdClassifier:
             confidence, predicted = probs.max(1)
         return predicted.item(), confidence.item()
 
-    def _predict_onnx(self, tensor: torch.Tensor) -> tuple[int, float]:
-        """Run inference with ONNX Runtime backend."""
+    def _get_logits_onnx(self, tensor: torch.Tensor) -> np.ndarray:
+        """Get raw logits from ONNX backend."""
         input_name = self._ort_session.get_inputs()[0].name
         input_np = tensor.unsqueeze(0).numpy()
         outputs = self._ort_session.run(None, {input_name: input_np})
-        logits = outputs[0][0]
+        return outputs[0][0]
+
+    def _predict_onnx(self, tensor: torch.Tensor) -> tuple[int, float]:
+        """Run inference with ONNX Runtime backend."""
+        logits = self._get_logits_onnx(tensor)
         # Softmax
         exp_logits = np.exp(logits - np.max(logits))
         probs = exp_logits / exp_logits.sum()
@@ -178,8 +189,8 @@ class BirdClassifier:
         confidence = float(probs[predicted])
         return predicted, confidence
 
-    def _predict_hailo(self, tensor: torch.Tensor) -> tuple[int, float]:
-        """Run inference with Hailo NPU backend."""
+    def _get_logits_hailo(self, tensor: torch.Tensor) -> np.ndarray:
+        """Get raw logits from Hailo NPU backend."""
         from hailo_platform import InferVStreams
 
         input_np = tensor.unsqueeze(0).numpy()
@@ -189,13 +200,40 @@ class BirdClassifier:
             input_data = {infer_model.input_vstream_infos[0].name: input_np}
             results = pipeline.infer(input_data)
             output_name = infer_model.output_vstream_infos[0].name
-            logits = results[output_name][0]
+            return results[output_name][0]
 
+    def _predict_hailo(self, tensor: torch.Tensor) -> tuple[int, float]:
+        """Run inference with Hailo NPU backend."""
+        logits = self._get_logits_hailo(tensor)
         exp_logits = np.exp(logits - np.max(logits))
         probs = exp_logits / exp_logits.sum()
         predicted = int(np.argmax(probs))
         confidence = float(probs[predicted])
         return predicted, confidence
+
+    def predict_logits(self, crop_bgr: np.ndarray) -> np.ndarray:
+        """
+        Return raw logits (before softmax) for a bird crop.
+
+        Used for logit averaging across multiple frames — accumulate logits,
+        average them, then apply softmax once for a more accurate prediction.
+
+        Args:
+            crop_bgr: BGR numpy array from OpenCV (the cropped bird region).
+
+        Returns:
+            1-D numpy array of logits (one per class).
+        """
+        tensor = self._preprocess_crop(crop_bgr)
+
+        if self.backend == "pytorch":
+            return self._get_logits_pytorch(tensor)
+        elif self.backend == "onnx":
+            return self._get_logits_onnx(tensor)
+        elif self.backend == "hailo":
+            return self._get_logits_hailo(tensor)
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}")
 
     def predict(self, crop_bgr: np.ndarray) -> tuple[str | None, float]:
         """
