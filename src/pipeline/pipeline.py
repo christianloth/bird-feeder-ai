@@ -11,6 +11,7 @@ Supports multiple deployment modes:
 
 import logging
 import signal
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -898,7 +899,18 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    import sys
+    # Expand globs that the shell didn't expand (e.g., running from PyCharm/uv)
+    import glob as _glob
+    for attr in ("video", "image"):
+        paths = getattr(args, attr, None)
+        if paths:
+            expanded = []
+            for p in paths:
+                if "*" in p or "?" in p:
+                    expanded.extend(sorted(_glob.glob(p)))
+                else:
+                    expanded.append(p)
+            setattr(args, attr, expanded or None)
 
     log_level = args.log_level or settings.log_level
     logging.basicConfig(

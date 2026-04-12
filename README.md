@@ -136,7 +136,7 @@ Test on a single image:
 python -m src.pipeline.pipeline --mode dev --image path/to/bird.jpg
 ```
 
-Run inference on a video file (annotated output only, no database):
+Run inference on a video file (annotated video output only, no database):
 
 ```bash
 python -m src.pipeline.pipeline --video path/to/video.mp4 --output
@@ -386,21 +386,59 @@ Automatically finds the latest run's checkpoint and continues from where it left
 
 ### 3. Export to ONNX
 
-After training, export the model to ONNX format for cross-platform inference or conversion to Hailo HEF:
+After training, export models to ONNX format for cross-platform inference or conversion to Hailo HEF. The export script handles both classification and YOLO models:
 
 ```bash
-# Exports latest run's best model (auto-detected)
-python -m src.training.export_onnx
+# Export EfficientNet-B2 classifier (auto-finds latest checkpoint)
+python -m src.training.export_onnx classifier
 
-# Or specify architecture
-python -m src.training.export_onnx --model mobilenetv2
+# Export MobileNetV2 classifier
+python -m src.training.export_onnx classifier --model mobilenetv2
+
+# Export a specific checkpoint
+python -m src.training.export_onnx classifier --checkpoint path/to/best_model.pth
+
+# Export YOLO wildlife detector
+python -m src.training.export_onnx yolo --weights models/wildlife/yolo11s-wildlife-equal/weights/best.pt
+
+# Export any YOLO variant
+python -m src.training.export_onnx yolo --weights models/wildlife/yolo11n-wildlife-equal/weights/best.pt
 ```
+
+#### Export CLI options
+
+**Classifier subcommand:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model {efficientnet_b2,mobilenetv2}` | `efficientnet_b2` | Model architecture |
+| `--checkpoint PATH` | Auto (latest run) | Path to `.pth` checkpoint |
+| `--output PATH` | `models/onnx/<model>_birds.onnx` | Output path |
+
+**YOLO subcommand:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--weights PATH` | *(required)* | Path to Ultralytics `.pt` file |
+| `--imgsz N` | `640` | Input image size |
+| `--output PATH` | `models/onnx/<model_name>.onnx` | Output path |
 
 The ONNX model is the intermediate step in the deployment chain:
 
 ```
 PyTorch (.pth) --> ONNX (.onnx) --> Hailo DFC compiler --> HEF (.hef)
 ```
+
+### 4. Convert to Hailo HEF
+
+The ONNX-to-HEF conversion requires the Hailo DFC compiler, which only runs on x86_64 Linux. Use the provided Google Colab notebook for compilation from any machine:
+
+1. Download the Hailo DFC wheel from [Hailo Developer Zone](https://hailo.ai/developer-zone/software-downloads/) (free account)
+2. Open `scripts/convert_to_hef.ipynb` in Google Colab
+3. Upload the DFC wheel, your ONNX files, and calibration images
+4. Run all cells -- downloads the compiled HEF files when done
+
+Pre-compiled HEFs for standard models (e.g., YOLOv11n for bird detection) are available from the [Hailo Model Zoo](https://github.com/hailo-ai/hailo_model_zoo) and don't need conversion.
 
 ## Configuration
 
