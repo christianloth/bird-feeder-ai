@@ -96,12 +96,12 @@ class Settings:
         if self.detection_model_path is None:
             object.__setattr__(
                 self, "detection_model_path",
-                self.models_dir / "hef" / "yolov8n.hef",
+                self.models_dir / "hef" / "yolov11n.hef",
             )
         if self.classifier_model_path is None:
             object.__setattr__(
                 self, "classifier_model_path",
-                self.models_dir / "hef" / "mobilenetv2_birds.hef",
+                self.models_dir / "hef" / "efficientnet_b2_birds.hef",
             )
         if self.wildlife_model_path is None:
             object.__setattr__(
