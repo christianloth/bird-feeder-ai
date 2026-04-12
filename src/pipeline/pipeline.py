@@ -692,6 +692,7 @@ class BirdPipeline:
 def _create_night_mode_components(
     device: str | None = None,
     backend: str = "ultralytics",
+    vdevice=None,
 ) -> tuple[WildlifeDetector | None, DayNightManager | None]:
     """
     Create wildlife detector and day/night manager using sunrise/sunset times.
@@ -718,7 +719,7 @@ def _create_night_mode_components(
     if backend == "ultralytics":
         wildlife_detector = WildlifeDetector.from_ultralytics(device=device)
     else:
-        wildlife_detector = WildlifeDetector.from_hailo()
+        wildlife_detector = WildlifeDetector.from_hailo(vdevice=vdevice)
 
     mode_manager = DayNightManager(weather)
 
@@ -783,10 +784,15 @@ def create_pipeline_hailo(
     Create a pipeline for Raspberry Pi with Hailo NPU.
 
     Uses Hailo HEF models for both detection and classification.
+    All models share a single VDevice (Hailo-10H has one physical device).
     If enable_night_mode is True, also loads the wildlife detector and
     sets up camera IR mode polling for automatic day/night switching.
     """
-    detector = BirdDetector.from_hailo(hef_path=detection_hef)
+    from hailo_platform import VDevice
+
+    vdevice = VDevice()
+
+    detector = BirdDetector.from_hailo(hef_path=detection_hef, vdevice=vdevice)
 
     if class_names is None:
         class_names = _load_class_names()
@@ -794,6 +800,7 @@ def create_pipeline_hailo(
     classifier = BirdClassifier.from_hailo(
         hef_path=classifier_hef or settings.classifier_model_path,
         class_names=class_names,
+        vdevice=vdevice,
     )
 
     camera = RTSPCamera(rtsp_url=rtsp_url)
@@ -803,6 +810,7 @@ def create_pipeline_hailo(
     if enable_night_mode:
         wildlife_detector, mode_manager = _create_night_mode_components(
             backend="hailo",
+            vdevice=vdevice,
         )
 
     return BirdPipeline(

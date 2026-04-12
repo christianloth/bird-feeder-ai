@@ -77,7 +77,22 @@ The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night 
 
 ### Install with uv (recommended)
 
+**Mac / Linux (development):**
+
 ```bash
+uv sync
+
+# Training / export (adds Ultralytics, ONNX, scikit-learn, matplotlib, etc.)
+uv sync --extra training
+```
+
+**Raspberry Pi (Hailo inference):**
+
+The Pi needs access to `hailo_platform`, which is installed as a system package via apt. Create the venv using the system Python so it can see apt-installed packages:
+
+```bash
+sudo apt install hailo-all
+uv venv --python /usr/bin/python --system-site-packages .venv
 uv sync
 ```
 
@@ -85,6 +100,9 @@ uv sync
 
 ```bash
 pip install -e .
+
+# Training / export
+pip install -e ".[training]"
 ```
 
 ### Install dev dependencies
@@ -95,12 +113,6 @@ uv sync --extra dev
 
 # pip
 pip install -e ".[dev]"
-```
-
-### Hailo runtime (Raspberry Pi only)
-
-```bash
-sudo apt install hailo-all
 ```
 
 ## Running the Pipeline

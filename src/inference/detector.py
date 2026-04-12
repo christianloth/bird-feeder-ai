@@ -87,9 +87,10 @@ class BirdDetector:
         cls,
         hef_path: str | Path | None = None,
         confidence_threshold: float | None = None,
+        vdevice=None,
     ) -> "BirdDetector":
         """Load YOLO HEF model for Hailo NPU inference."""
-        from hailo_platform import HEF, VDevice, ConfigureParams
+        from hailo_platform import VDevice, FormatType
 
         hef_path = hef_path or settings.detection_model_path
         if not Path(hef_path).exists():
@@ -97,14 +98,30 @@ class BirdDetector:
             raise FileNotFoundError(f"Detection HEF model not found: {hef_path}")
 
         logger.debug(f"Loading Hailo YOLO detector from {hef_path}")
-        hef = HEF(str(hef_path))
-        vdevice = VDevice()
-        infer_model = vdevice.configure(hef, ConfigureParams.create_from_hef(hef))
+        if vdevice is None:
+            vdevice = VDevice()
+        infer_model = vdevice.create_infer_model(str(hef_path))
+        infer_model.input().set_format_type(FormatType.UINT8)
+        nms_threshold = confidence_threshold or settings.detection_confidence_threshold
+        for output in infer_model.outputs:
+            output.set_format_type(FormatType.FLOAT32)
+            if output.is_nms:
+                output.set_nms_score_threshold(nms_threshold)
+                output.set_nms_iou_threshold(0.45)
+        configured_model = infer_model.configure()
 
-        logger.info(f"Loaded Hailo YOLO detector from {hef_path}")
+        input_shape = infer_model.input().shape  # (H, W, C)
+        logger.info(
+            f"Loaded Hailo YOLO detector from {hef_path} "
+            f"(input={input_shape}, outputs={infer_model.output_names})"
+        )
         return cls(
             backend="hailo",
-            model={"hef": hef, "vdevice": vdevice, "infer_model": infer_model},
+            model={
+                "vdevice": vdevice,
+                "infer_model": infer_model,
+                "configured": configured_model,
+            },
             confidence_threshold=confidence_threshold,
         )
 
@@ -136,43 +153,47 @@ class BirdDetector:
     def _detect_hailo(
         self, frame: np.ndarray,
     ) -> tuple[list[tuple[int, int, int, int]], list[float]]:
-        """Run detection with Hailo NPU backend."""
+        """Run detection with Hailo NPU backend (InferModel API)."""
         import cv2
-        from hailo_platform import InferVStreams
 
         infer_model = self._model["infer_model"]
-        input_info = infer_model.input_vstream_infos[0]
-        h, w = input_info.shape[1], input_info.shape[2]
+        configured = self._model["configured"]
+        input_shape = infer_model.input().shape  # (H, W, C)
+        h, w = input_shape[0], input_shape[1]
 
-        # Preprocess: resize to model input size
+        # Preprocess: resize to model input size, keep as uint8
         orig_h, orig_w = frame.shape[:2]
-        resized = cv2.resize(frame, (w, h))
-        input_data = np.expand_dims(resized, axis=0).astype(np.float32) / 255.0
+        resized = cv2.resize(frame, (w, h)).astype(np.uint8)
 
-        with InferVStreams(infer_model) as pipeline:
-            results = pipeline.infer({input_info.name: input_data})
+        # Create bindings and run inference
+        bindings = configured.create_bindings()
+        bindings.input().set_buffer(np.ascontiguousarray(resized))
+        for name in infer_model.output_names:
+            out_shape = infer_model.output(name).shape
+            bindings.output(name).set_buffer(np.empty(out_shape, dtype=np.float32))
+        configured.run([bindings], timeout=5000)
 
-        # Parse YOLO output (format depends on Hailo post-processing config)
-        output_name = infer_model.output_vstream_infos[0].name
-        detections = results[output_name][0]
+        # NMS output: list of 80 arrays (one per COCO class)
+        # Each detection: [y1, x1, y2, x2, confidence] with normalized coords
+        output_name = infer_model.output_names[0]
+        nms_results = bindings.output(output_name).get_buffer()
 
         bboxes = []
         confidences = []
 
-        for det in detections:
-            class_id = int(det[5]) if len(det) > 5 else int(det[4])
-            conf = float(det[4]) if len(det) > 5 else float(det[5])
-
-            if class_id != self.bird_class_id or conf < self.confidence_threshold:
-                continue
-
-            # Scale bounding box back to original frame size
-            x1 = int(det[0] * orig_w / w)
-            y1 = int(det[1] * orig_h / h)
-            x2 = int(det[2] * orig_w / w)
-            y2 = int(det[3] * orig_h / h)
-            bboxes.append((x1, y1, x2, y2))
-            confidences.append(conf)
+        # Only look at the bird class
+        if self.bird_class_id < len(nms_results):
+            for det in nms_results[self.bird_class_id]:
+                conf = float(det[4])
+                if conf < self.confidence_threshold:
+                    continue
+                # Normalized [y1, x1, y2, x2] -> pixel [x1, y1, x2, y2]
+                y1 = int(det[0] * orig_h)
+                x1 = int(det[1] * orig_w)
+                y2 = int(det[2] * orig_h)
+                x2 = int(det[3] * orig_w)
+                bboxes.append((x1, y1, x2, y2))
+                confidences.append(conf)
 
         return bboxes, confidences
 
@@ -286,9 +307,10 @@ class WildlifeDetector:
         cls,
         hef_path: str | Path | None = None,
         confidence_threshold: float | None = None,
+        vdevice=None,
     ) -> "WildlifeDetector":
         """Load wildlife YOLO HEF model for Hailo NPU inference."""
-        from hailo_platform import HEF, VDevice, ConfigureParams
+        from hailo_platform import VDevice, FormatType
 
         hef_path = hef_path or settings.wildlife_model_path
         if not Path(hef_path).exists():
@@ -296,14 +318,30 @@ class WildlifeDetector:
             raise FileNotFoundError(f"Wildlife HEF model not found: {hef_path}")
 
         logger.debug(f"Loading Hailo wildlife detector from {hef_path}")
-        hef = HEF(str(hef_path))
-        vdevice = VDevice()
-        infer_model = vdevice.configure(hef, ConfigureParams.create_from_hef(hef))
+        if vdevice is None:
+            vdevice = VDevice()
+        infer_model = vdevice.create_infer_model(str(hef_path))
+        infer_model.input().set_format_type(FormatType.UINT8)
+        nms_threshold = confidence_threshold or settings.wildlife_confidence_threshold
+        for output in infer_model.outputs:
+            output.set_format_type(FormatType.FLOAT32)
+            if output.is_nms:
+                output.set_nms_score_threshold(nms_threshold)
+                output.set_nms_iou_threshold(0.45)
+        configured_model = infer_model.configure()
 
-        logger.info(f"Loaded Hailo wildlife detector from {hef_path}")
+        input_shape = infer_model.input().shape
+        logger.info(
+            f"Loaded Hailo wildlife detector from {hef_path} "
+            f"(input={input_shape}, outputs={infer_model.output_names})"
+        )
         return cls(
             backend="hailo",
-            model={"hef": hef, "vdevice": vdevice, "infer_model": infer_model},
+            model={
+                "vdevice": vdevice,
+                "infer_model": infer_model,
+                "configured": configured_model,
+            },
             confidence_threshold=confidence_threshold,
         )
 
@@ -364,43 +402,46 @@ class WildlifeDetector:
         return detections
 
     def _detect_hailo(self, frame: np.ndarray) -> list[WildlifeDetection]:
-        """Run detection with Hailo NPU backend."""
+        """Run detection with Hailo NPU backend (InferModel API)."""
         import cv2
-        from hailo_platform import InferVStreams
 
         infer_model = self._model["infer_model"]
-        input_info = infer_model.input_vstream_infos[0]
-        h, w = input_info.shape[1], input_info.shape[2]
+        configured = self._model["configured"]
+        input_shape = infer_model.input().shape  # (H, W, C)
+        h, w = input_shape[0], input_shape[1]
 
         orig_h, orig_w = frame.shape[:2]
-        resized = cv2.resize(frame, (w, h))
-        input_data = np.expand_dims(resized, axis=0).astype(np.float32) / 255.0
+        resized = cv2.resize(frame, (w, h)).astype(np.uint8)
 
-        with InferVStreams(infer_model) as pipeline:
-            results = pipeline.infer({input_info.name: input_data})
+        # Create bindings and run inference
+        bindings = configured.create_bindings()
+        bindings.input().set_buffer(np.ascontiguousarray(resized))
+        for name in infer_model.output_names:
+            out_shape = infer_model.output(name).shape
+            bindings.output(name).set_buffer(np.empty(out_shape, dtype=np.float32))
+        configured.run([bindings], timeout=5000)
 
-        output_name = infer_model.output_vstream_infos[0].name
-        raw_detections = results[output_name][0]
+        # NMS output: list of arrays (one per class)
+        # Each detection: [y1, x1, y2, x2, confidence] with normalized coords
+        output_name = infer_model.output_names[0]
+        nms_results = bindings.output(output_name).get_buffer()
 
         detections = []
-        for det in raw_detections:
-            class_id = int(det[5]) if len(det) > 5 else int(det[4])
-            conf = float(det[4]) if len(det) > 5 else float(det[5])
-
-            if conf < self.confidence_threshold:
-                continue
-
-            x1 = int(det[0] * orig_w / w)
-            y1 = int(det[1] * orig_h / h)
-            x2 = int(det[2] * orig_w / w)
-            y2 = int(det[3] * orig_h / h)
-
-            class_name = self.class_names.get(class_id, f"class_{class_id}")
-            detections.append(WildlifeDetection(
-                bbox=(x1, y1, x2, y2),
-                confidence=conf,
-                class_name=class_name,
-                class_id=class_id,
-            ))
+        for class_id, class_dets in enumerate(nms_results):
+            for det in class_dets:
+                conf = float(det[4])
+                if conf < self.confidence_threshold:
+                    continue
+                y1 = int(det[0] * orig_h)
+                x1 = int(det[1] * orig_w)
+                y2 = int(det[2] * orig_h)
+                x2 = int(det[3] * orig_w)
+                class_name = self.class_names.get(class_id, f"class_{class_id}")
+                detections.append(WildlifeDetection(
+                    bbox=(x1, y1, x2, y2),
+                    confidence=conf,
+                    class_name=class_name,
+                    class_id=class_id,
+                ))
 
         return detections

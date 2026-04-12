@@ -5,16 +5,10 @@ description = "24/7 bird species detection and tracking using Raspberry Pi 5 + H
 requires-python = "==3.13.*"
 
 dependencies = [
-    # ML / Training
+    # ML / Inference
     "torch>=2.0",
     "torchvision>=0.15",
-    "ultralytics>=8.4",
     "pillow>=10.0",
-    "scikit-learn>=1.3",
-    "matplotlib>=3.7",
-    "seaborn>=0.12",
-    "tqdm>=4.65",
-    "onnx>=1.16,<1.18",
     # Backend
     "fastapi>=0.110",
     "uvicorn>=0.30",
@@ -25,16 +19,26 @@ dependencies = [
     "opencv-python-headless>=4.8",
     "numpy>=1.24",
     "norfair>=2.3",
+    # Config
+    "pyyaml>=6.0",
     # Weather
     "httpx>=0.27",
     # Audio (optional, uncomment to install)
     # "birdnet>=0.2",
     # Hailo (install on Raspberry Pi only via: sudo apt install hailo-all)
     # "hailo-platform",
-    "onnxruntime>=1.24.4",
 ]
 
 [project.optional-dependencies]
+training = [
+    "ultralytics>=8.4",
+    "scikit-learn>=1.3",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "tqdm>=4.65",
+    "onnx>=1.16,<1.18",
+    "onnxruntime>=1.24.4",
+]
 dev = [
     "jupyter>=1.0",
     "ipykernel>=6.0",

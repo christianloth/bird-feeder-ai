@@ -126,25 +126,38 @@ class BirdClassifier:
         hef_path: str | Path,
         class_names: dict[int, str] | None = None,
         confidence_threshold: float | None = None,
+        vdevice=None,
     ) -> "BirdClassifier":
         """Load a Hailo HEF model for NPU inference on Raspberry Pi."""
-        from hailo_platform import HEF, VDevice, ConfigureParams
+        from hailo_platform import VDevice, FormatType
 
         if not Path(hef_path).exists():
             logger.critical(f"Classifier HEF model not found: {hef_path}")
             raise FileNotFoundError(f"Classifier HEF model not found: {hef_path}")
 
         logger.debug(f"Loading Hailo classifier from {hef_path}")
-        hef = HEF(str(hef_path))
-        vdevice = VDevice()
-        infer_model = vdevice.configure(hef, ConfigureParams.create_from_hef(hef))
+        if vdevice is None:
+            vdevice = VDevice()
+        infer_model = vdevice.create_infer_model(str(hef_path))
+        infer_model.input().set_format_type(FormatType.FLOAT32)
+        infer_model.output().set_format_type(FormatType.FLOAT32)
+        configured_model = infer_model.configure()
 
-        logger.info(f"Loaded Hailo classifier from {hef_path}")
+        input_shape = infer_model.input().shape  # (H, W, C)
+        logger.info(
+            f"Loaded Hailo classifier from {hef_path} "
+            f"(input={input_shape}, output={infer_model.output().shape})"
+        )
         return cls(
             backend="hailo",
-            hef_model={"hef": hef, "vdevice": vdevice, "infer_model": infer_model},
+            hef_model={
+                "vdevice": vdevice,
+                "infer_model": infer_model,
+                "configured": configured_model,
+            },
             class_names=class_names,
             confidence_threshold=confidence_threshold,
+            input_size=input_shape[0],
         )
 
     def _preprocess_crop(self, crop_bgr: np.ndarray) -> torch.Tensor:
@@ -190,17 +203,21 @@ class BirdClassifier:
         return predicted, confidence
 
     def _get_logits_hailo(self, tensor: torch.Tensor) -> np.ndarray:
-        """Get raw logits from Hailo NPU backend."""
-        from hailo_platform import InferVStreams
-
-        input_np = tensor.unsqueeze(0).numpy()
+        """Get raw logits from Hailo NPU backend (InferModel API)."""
         infer_model = self._hef_model["infer_model"]
+        configured = self._hef_model["configured"]
 
-        with InferVStreams(infer_model) as pipeline:
-            input_data = {infer_model.input_vstream_infos[0].name: input_np}
-            results = pipeline.infer(input_data)
-            output_name = infer_model.output_vstream_infos[0].name
-            return results[output_name][0]
+        # Convert CHW tensor to HWC numpy for Hailo (no batch dim)
+        input_np = tensor.numpy().transpose(1, 2, 0)  # CHW -> HWC
+        input_np = np.ascontiguousarray(input_np, dtype=np.float32)
+
+        bindings = configured.create_bindings()
+        bindings.input().set_buffer(input_np)
+        out_shape = infer_model.output().shape
+        bindings.output().set_buffer(np.empty(out_shape, dtype=np.float32))
+        configured.run([bindings], timeout=5000)
+
+        return bindings.output().get_buffer()
 
     def _predict_hailo(self, tensor: torch.Tensor) -> tuple[int, float]:
         """Run inference with Hailo NPU backend."""
