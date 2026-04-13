@@ -175,20 +175,22 @@ class BirdClassifier:
 
         The HEF has normalization baked in (the .alls model script applies
         (pixel - 127.5) / 127.5 on-chip). The host must send raw uint8 pixels
-        with NO normalization — just Resize → CenterCrop.
+        with NO normalization — just direct resize to the input size.
+
+        Uses direct Resize (not Resize+CenterCrop) because the input is already
+        a tight YOLO crop — center-cropping would discard discriminative
+        features at the edges (wing tips, tail, head). Matches val/inference
+        transforms in transforms.py.
         """
         from torchvision import transforms
 
         crop_rgb = crop_bgr[:, :, ::-1]
         pil_image = Image.fromarray(crop_rgb)
-        # Resize + CenterCrop only — no ToTensor, no Normalize
-        spatial_transform = transforms.Compose([
-            transforms.Resize(self._input_size + 32),
-            transforms.CenterCrop(self._input_size),
-        ])
-        pil_cropped = spatial_transform(pil_image)
+        # Direct resize to square — no CenterCrop, no ToTensor, no Normalize
+        spatial_transform = transforms.Resize((self._input_size, self._input_size))
+        pil_resized = spatial_transform(pil_image)
         # Convert to float32 numpy in HWC format, values 0-255
-        return np.array(pil_cropped, dtype=np.float32)
+        return np.array(pil_resized, dtype=np.float32)
 
     def _get_logits_pytorch(self, tensor: torch.Tensor) -> np.ndarray:
         """Get raw logits from PyTorch backend."""

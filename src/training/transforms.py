@@ -93,18 +93,25 @@ def get_val_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compo
         input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
 
     Pipeline:
-    1. Resize(input_size + 32) — resize shortest edge (standard ImageNet eval protocol)
-    2. CenterCrop(input_size) — deterministic center crop
-    3. transforms.ToTensor()
-    4. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+    1. Resize((input_size, input_size)) — direct resize to square, no center crop
+    2. transforms.ToTensor()
+    3. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
 
-    WHY different from training?
-    - No randomness ensures evaluation is reproducible
-    - Resize then CenterCrop is the standard ImageNet eval protocol
+    WHY direct resize instead of Resize+CenterCrop?
+    - The standard ImageNet eval (Resize(256) → CenterCrop(224)) was designed
+      for arbitrary photos where the subject is loosely centered. It throws
+      away ~23% of pixels around the edges.
+    - In production, our input is a TIGHT YOLO bounding-box crop where the
+      bird already fills the frame. Center-cropping would discard wing tips,
+      tail feathers, and head crests — exactly the discriminative features
+      a fine-grained bird classifier needs.
+    - Direct resize keeps the entire bird visible. Aspect ratio distortion
+      is acceptable because training augmentation (RandomResizedCrop) already
+      produces aspect-ratio-distorted square outputs.
+    - Validation must match production preprocessing for accurate metrics.
     """
     return transforms.Compose([
-        transforms.Resize(input_size + 32),
-        transforms.CenterCrop(input_size),
+        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ])
