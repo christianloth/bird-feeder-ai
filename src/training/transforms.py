@@ -74,6 +74,15 @@ def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Com
     4. ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)
     5. transforms.ToTensor()
     6. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+    7. RandomErasing(p=0.25, scale=(0.02, 0.2)) — simulates occlusion
+
+    WHY RandomErasing? Production birds at the feeder are constantly partially
+    occluded by feeder bars, perches, leaves, and other birds. NABirds training
+    images are clean field-guide-style shots. Without occlusion augmentation,
+    the model develops brittle features that fail when parts of the bird are
+    hidden. p=0.25 means 75% of images stay untouched; scale=(0.02, 0.2)
+    erases 2-20% of the image (smaller than torchvision default to avoid
+    hiding too much of the bird).
     """
     return transforms.Compose([
         transforms.RandomResizedCrop(input_size),
@@ -82,6 +91,7 @@ def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Com
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.2)),
     ])
 
 

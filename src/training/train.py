@@ -362,8 +362,19 @@ def train(
     # 2. Move model to device
     model = model.to(device)
 
-    # 3. Loss function — standard CrossEntropyLoss for classification
-    criterion = nn.CrossEntropyLoss()
+    # 3. Loss function — CrossEntropyLoss with label smoothing.
+    #
+    # WHY label_smoothing=0.1?
+    # - Standard recommendation for ViT fine-tuning (Steiner et al. 2021,
+    #   timm defaults, HuggingFace ViT examples).
+    # - With 555 fine-grained bird species, many are visually near-identical
+    #   (House Finch vs Purple Finch vs Cassin's Finch). Hard one-hot targets
+    #   over-penalize "almost right" predictions and force overconfidence.
+    # - Label smoothing replaces [0,0,1,0,...] with [eps,eps,1-eps,eps,...]
+    #   so the model learns calibrated probabilities instead of being forced
+    #   to be 100% confident. Typically gains +0.5-1% top-1 accuracy on
+    #   fine-grained tasks at zero compute cost.
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # 4. Optimizer — only optimize unfrozen parameters (filter by requires_grad)
     optimizer = optim.Adam(
