@@ -329,7 +329,7 @@ def crop_bird_roi(
         bbox: Bounding box (x1, y1, x2, y2).
         padding: Extra pixels around the bounding box.
         target_size: Resize crop to this size for the classifier.
-            Use (224, 224) for MobileNetV2/EfficientNet.
+            Use (224, 224) for ViT-Small, (300, 300) for EfficientNet-Lite4.
             Set to None to skip resizing.
 
     Returns:

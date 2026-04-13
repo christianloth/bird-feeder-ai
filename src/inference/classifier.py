@@ -1,7 +1,7 @@
 """
 Bird species classifier supporting multiple backends.
 
-Runs a fine-tuned model (MobileNetV2 or EfficientNet-B2) on cropped bird images. Supports:
+Runs a fine-tuned model (ViT-Small or EfficientNet-Lite4) on cropped bird images. Supports:
 - PyTorch (MPS/CUDA/CPU) — for Mac development and GPU servers
 - ONNX Runtime — cross-platform, optimized inference
 - Hailo NPU — Raspberry Pi AI HAT+ production deployment
@@ -28,7 +28,7 @@ class BirdClassifier:
     Species classifier with pluggable backends.
 
     Usage:
-        classifier = BirdClassifier.from_pytorch("models/bird-classifier/mobilenetv2/2026-03-26_12-43/best_model.pth")
+        classifier = BirdClassifier.from_pytorch("models/bird-classifier/vit_small/best_model.pth")
         species, confidence = classifier.predict(bird_crop_bgr)
     """
 
@@ -52,6 +52,7 @@ class BirdClassifier:
         from config.settings import settings
         self.confidence_threshold = confidence_threshold or settings.classification_confidence_threshold
         self._transform = get_inference_transforms(input_size)
+        self._input_size = input_size
 
     @classmethod
     def from_pytorch(
@@ -61,7 +62,7 @@ class BirdClassifier:
         num_classes: int = 555,
         device: str | None = None,
         confidence_threshold: float | None = None,
-        model_name: str = "efficientnet_b2",
+        model_name: str = "vit_small",
     ) -> "BirdClassifier":
         """Load a PyTorch checkpoint. Auto-selects MPS/CUDA/CPU."""
         from src.training.model import create_model, get_model_config
@@ -161,13 +162,33 @@ class BirdClassifier:
         )
 
     def _preprocess_crop(self, crop_bgr: np.ndarray) -> torch.Tensor:
-        """Convert a BGR numpy crop to a normalized tensor."""
+        """Convert a BGR numpy crop to a normalized tensor for PyTorch/ONNX backends."""
         # BGR → RGB → PIL
         crop_rgb = crop_bgr[:, :, ::-1]
         pil_image = Image.fromarray(crop_rgb)
         # Apply inference transforms (Resize→CenterCrop→ToTensor→Normalize)
         tensor = self._transform(pil_image)
         return tensor
+
+    def _preprocess_crop_hailo(self, crop_bgr: np.ndarray) -> np.ndarray:
+        """Convert a BGR numpy crop to raw 0-255 pixels in HWC format for Hailo.
+
+        The HEF has normalization baked in (the .alls model script applies
+        (pixel - 127.5) / 127.5 on-chip). The host must send raw uint8 pixels
+        with NO normalization — just Resize → CenterCrop.
+        """
+        from torchvision import transforms
+
+        crop_rgb = crop_bgr[:, :, ::-1]
+        pil_image = Image.fromarray(crop_rgb)
+        # Resize + CenterCrop only — no ToTensor, no Normalize
+        spatial_transform = transforms.Compose([
+            transforms.Resize(self._input_size + 32),
+            transforms.CenterCrop(self._input_size),
+        ])
+        pil_cropped = spatial_transform(pil_image)
+        # Convert to float32 numpy in HWC format, values 0-255
+        return np.array(pil_cropped, dtype=np.float32)
 
     def _get_logits_pytorch(self, tensor: torch.Tensor) -> np.ndarray:
         """Get raw logits from PyTorch backend."""
@@ -202,13 +223,16 @@ class BirdClassifier:
         confidence = float(probs[predicted])
         return predicted, confidence
 
-    def _get_logits_hailo(self, tensor: torch.Tensor) -> np.ndarray:
-        """Get raw logits from Hailo NPU backend (InferModel API)."""
+    def _get_logits_hailo(self, input_np: np.ndarray) -> np.ndarray:
+        """Get raw logits from Hailo NPU backend (InferModel API).
+
+        Args:
+            input_np: Raw pixels in HWC format, float32, values 0-255.
+                      NOT normalized — the HEF handles normalization on-chip.
+        """
         infer_model = self._hef_model["infer_model"]
         configured = self._hef_model["configured"]
 
-        # Convert CHW tensor to HWC numpy for Hailo (no batch dim)
-        input_np = tensor.numpy().transpose(1, 2, 0)  # CHW -> HWC
         input_np = np.ascontiguousarray(input_np, dtype=np.float32)
 
         bindings = configured.create_bindings()
@@ -219,9 +243,9 @@ class BirdClassifier:
 
         return bindings.output().get_buffer()
 
-    def _predict_hailo(self, tensor: torch.Tensor) -> tuple[int, float]:
+    def _predict_hailo(self, input_np: np.ndarray) -> tuple[int, float]:
         """Run inference with Hailo NPU backend."""
-        logits = self._get_logits_hailo(tensor)
+        logits = self._get_logits_hailo(input_np)
         exp_logits = np.exp(logits - np.max(logits))
         probs = exp_logits / exp_logits.sum()
         predicted = int(np.argmax(probs))
@@ -241,14 +265,15 @@ class BirdClassifier:
         Returns:
             1-D numpy array of logits (one per class).
         """
-        tensor = self._preprocess_crop(crop_bgr)
+        if self.backend == "hailo":
+            input_np = self._preprocess_crop_hailo(crop_bgr)
+            return self._get_logits_hailo(input_np)
 
+        tensor = self._preprocess_crop(crop_bgr)
         if self.backend == "pytorch":
             return self._get_logits_pytorch(tensor)
         elif self.backend == "onnx":
             return self._get_logits_onnx(tensor)
-        elif self.backend == "hailo":
-            return self._get_logits_hailo(tensor)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
 
@@ -263,16 +288,18 @@ class BirdClassifier:
             (species_name, confidence) or (None, 0.0) if below threshold.
         """
         t0 = time.perf_counter()
-        tensor = self._preprocess_crop(crop_bgr)
 
-        if self.backend == "pytorch":
-            class_idx, confidence = self._predict_pytorch(tensor)
-        elif self.backend == "onnx":
-            class_idx, confidence = self._predict_onnx(tensor)
-        elif self.backend == "hailo":
-            class_idx, confidence = self._predict_hailo(tensor)
+        if self.backend == "hailo":
+            input_np = self._preprocess_crop_hailo(crop_bgr)
+            class_idx, confidence = self._predict_hailo(input_np)
         else:
-            raise ValueError(f"Unknown backend: {self.backend}")
+            tensor = self._preprocess_crop(crop_bgr)
+            if self.backend == "pytorch":
+                class_idx, confidence = self._predict_pytorch(tensor)
+            elif self.backend == "onnx":
+                class_idx, confidence = self._predict_onnx(tensor)
+            else:
+                raise ValueError(f"Unknown backend: {self.backend}")
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         species_name = self.class_names.get(class_idx, f"class_{class_idx}")

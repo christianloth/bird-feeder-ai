@@ -17,8 +17,10 @@ bird_detection:
   bird_class_id: 14            # COCO class 14 = "bird"
 
 # --- Daytime: Species Classification (Stage 2) ---
-# EfficientNet-B2 classifier that takes the cropped bird from Stage 1
+# ViT-Small classifier that takes the cropped bird from Stage 1
 # and predicts which of 555 NABirds species it is.
+# ViT-Small chosen for fine-grained classification — self-attention captures
+# long-range relationships between discriminative bird features (bill ↔ tail).
 species_classification:
   confidence_threshold: 0.60  # min confidence to accept a species prediction
 

@@ -32,7 +32,7 @@ That's it. The pipeline connects to your camera, detects birds (day) or wildlife
 
 ```
                           DAYTIME                                    NIGHTTIME
-Camera (RTSP) --> YOLO11n (COCO bird) --> Tracker --> EfficientNet-B2 --> DB
+Camera (RTSP) --> YOLO11n (COCO bird) --> Tracker --> ViT-Small ---------> DB
   or video file   "Is there a bird?"       Dedup      "What species?"     SQLite
                                                        555 NABirds        + images
 
@@ -46,7 +46,7 @@ The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night 
 **Daytime pipeline (bird species):**
 1. **Detection** -- YOLO11n finds birds (COCO class 14) and outputs bounding boxes
 2. **Tracking** -- Centroid-based tracker deduplicates so a bird sitting for 30 seconds is logged once
-3. **Classification** -- Cropped bird region is classified by EfficientNet-B2 (555 NABirds species)
+3. **Classification** -- Cropped bird region is classified by ViT-Small (555 NABirds species)
 4. **Storage** -- Detection saved to SQLite with species, confidence, bbox coordinates, and one full frame image (crops generated on-the-fly)
 
 **Nighttime pipeline (wildlife):**
@@ -133,7 +133,7 @@ The RTSP URL comes from `config/config.yaml`. The pipeline runs continuously unt
 | `--image PATH` | None | Process a single image instead of live camera |
 | `--video PATH` | None | Process a video file instead of live camera |
 | `--process-every-n N` | From config | Process every Nth frame in video mode |
-| `--checkpoint PATH` | `models/bird-classifier/efficientnet_b2/best_model.pth` | Path to classifier checkpoint |
+| `--checkpoint PATH` | `models/bird-classifier/vit_small/best_model.pth` | Path to classifier checkpoint |
 | `--rtsp-url URL` | From config | RTSP camera URL (overrides config) |
 | `--device {cuda,mps,cpu}` | Auto (CUDA → MPS → CPU) | Force compute device |
 | `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` | From config | Logging verbosity |
@@ -302,7 +302,7 @@ python -m scripts.export_training_data --format both --min-confidence 0.7
 # Only manually reviewed detections
 python -m scripts.export_training_data --format both --reviewed-only
 
-# Classification format only (for retraining EfficientNet)
+# Classification format only (for retraining the classifier)
 python -m scripts.export_training_data --format classification --min-confidence 0.5
 
 # YOLO format only (for retraining the detector)
@@ -327,12 +327,14 @@ python -m scripts.export_training_data --format both --since 2026-04-01
 
 ## Training
 
-The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species.
+The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species. Both models are confirmed to run in a single pass on the Hailo-10H NPU.
 
-| Model | Input Size | Params | Training Strategy | LR Scheduler |
-|---|---|---|---|---|
-| **EfficientNet-B2** (default) | 260x260 | 7.8M | Single-phase end-to-end | ReduceLROnPlateau |
-| **MobileNetV2** | 224x224 | 3.4M | Two-phase (freeze then unfreeze) | StepLR |
+| Model | Input Size | Params | Training Strategy | LR Scheduler | Hailo-10H FPS |
+|---|---|---|---|---|---|
+| **ViT-Small** (default) | 224x224 | 21.1M | Single-phase end-to-end (lr=1e-4) | ReduceLROnPlateau | 116 |
+| **EfficientNet-Lite4** | 300x300 | 13.0M | Single-phase end-to-end (lr=1e-3) | ReduceLROnPlateau | 137 |
+
+ViT-Small is the primary model -- self-attention excels at fine-grained bird classification (TransFG, AAAI 2022: 89.9% on NABirds). EfficientNet-Lite4 is a CNN alternative with complementary error profiles.
 
 ### 1. Download the NABirds dataset
 
@@ -341,39 +343,39 @@ Download NABirds from [https://dl.allaboutbirds.org/nabirds](https://dl.allabout
 ### 2. Run training
 
 ```bash
-# EfficientNet-B2 (default)
+# ViT-Small (default — recommended for fine-grained bird classification)
 python -m src.training.train
 
-# MobileNetV2
-python -m src.training.train --model mobilenetv2
+# EfficientNet-Lite4 (CNN alternative)
+python -m src.training.train --model efficientnet_lite4
 ```
 
 #### Training CLI options
 
 | Flag | Default | Description |
 |---|---|---|
-| `--model {efficientnet_b2,mobilenetv2}` | `efficientnet_b2` | Model architecture |
+| `--model {vit_small,efficientnet_lite4}` | `vit_small` | Model architecture |
 | `--batch-size` | `32` | Batch size |
 | `--num-workers` | `4` | Data loading workers |
 | `--amp` | Off | Enable mixed precision (CUDA only) |
 | `--resume` | Off | Resume from latest run's checkpoint |
-| `--preprocessed PATH` | None | Use preprocessed dataset (MobileNetV2 only) |
+| `--preprocessed PATH` | None | Use preprocessed dataset (ViT-Small only) |
 
 #### Training strategies
 
-**EfficientNet-B2** trains end-to-end in a single phase with all layers unfrozen. ReduceLROnPlateau only drops the learning rate when validation accuracy stalls. Early stopping (patience=5) halts training if no improvement for 5 consecutive epochs.
+Both models train end-to-end in a single phase with ReduceLROnPlateau and early stopping (patience=5).
 
-**MobileNetV2** uses a two-phase strategy:
-- **Phase 1** (10 epochs, lr=0.001) -- Backbone frozen, only the classifier head trains.
-- **Phase 2** (25 epochs, lr=0.0001) -- Backbone layers 14+ unfrozen, fine-tuned with lower LR.
+**ViT-Small** uses a lower learning rate (1e-4) because transformer self-attention layers are sensitive to large gradient updates. Pretrained on ImageNet-21K (14M images) via timm's `augreg_in21k_ft_in1k` checkpoint.
+
+**EfficientNet-Lite4** uses standard LR (1e-3). Hardware-friendly CNN -- no squeeze-and-excitation blocks (which cause multi-pass issues on Hailo), ReLU6 instead of swish.
 
 #### Training output
 
 Each run creates a timestamped folder:
 
 ```
-models/bird-classifier/efficientnet_b2/
-  2026-03-27_04-12/
+models/bird-classifier/vit_small/
+  2026-04-12_14-30/
     best_model.pth          # Best weights (by val accuracy)
     checkpoint.pth          # Full state for --resume
     training_history.png    # Loss and accuracy curves
@@ -401,11 +403,11 @@ Automatically finds the latest run's checkpoint and continues from where it left
 After training, export models to ONNX format for cross-platform inference or conversion to Hailo HEF. The export script handles both classification and YOLO models:
 
 ```bash
-# Export EfficientNet-B2 classifier (auto-finds latest checkpoint)
+# Export ViT-Small classifier (auto-finds latest checkpoint)
 python -m src.training.export_onnx classifier
 
-# Export MobileNetV2 classifier
-python -m src.training.export_onnx classifier --model mobilenetv2
+# Export EfficientNet-Lite4 classifier
+python -m src.training.export_onnx classifier --model efficientnet_lite4
 
 # Export a specific checkpoint
 python -m src.training.export_onnx classifier --checkpoint path/to/best_model.pth
@@ -423,7 +425,7 @@ python -m src.training.export_onnx yolo --weights models/wildlife/yolo11n-wildli
 
 | Flag | Default | Description |
 |---|---|---|
-| `--model {efficientnet_b2,mobilenetv2}` | `efficientnet_b2` | Model architecture |
+| `--model {vit_small,efficientnet_lite4}` | `vit_small` | Model architecture |
 | `--checkpoint PATH` | Auto (latest run) | Path to `.pth` checkpoint |
 | `--output PATH` | `models/onnx/<model>_birds.onnx` | Output path |
 
