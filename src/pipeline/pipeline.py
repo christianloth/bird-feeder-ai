@@ -608,11 +608,21 @@ class BirdPipeline:
         t_start = time.time()
 
         while cap.isOpened():
-            ret, frame = cap.read()
+            should_process = frame_num % skip == 0
+
+            # Use grab()/retrieve() to avoid decoding skipped frames.
+            # grab() advances the codec without producing a BGR image;
+            # retrieve() does the full decode only when we need the pixels.
+            if video_writer or should_process:
+                ret, frame = cap.read()
+            else:
+                ret = cap.grab()
+                frame = None
+
             if not ret:
                 break
 
-            if frame_num % skip == 0:
+            if should_process:
                 timestamp = frame_num / fps
 
                 try:
