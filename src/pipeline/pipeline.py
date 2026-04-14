@@ -109,13 +109,13 @@ class BirdPipeline:
         self._session_factory = get_session_factory(engine)
 
         # Load species from NABirds if not already in DB
-        classes_file = settings.data_dir / "nabirds" / "classes.txt"
-        if classes_file.exists():
+        nabirds_dir = settings.data_dir / "nabirds"
+        if nabirds_dir.exists():
             with self._session_factory() as session:
-                load_species_from_dataset(session, classes_file)
+                load_species_from_dataset(session, nabirds_dir)
             logger.debug("Species lookup table loaded")
         else:
-            logger.warning(f"NABirds classes file not found at {classes_file}")
+            logger.warning(f"NABirds data not found at {nabirds_dir}")
 
         # Load wildlife species for night-mode detection
         with self._session_factory() as session:
