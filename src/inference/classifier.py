@@ -243,7 +243,7 @@ class BirdClassifier:
         bindings.output().set_buffer(np.empty(out_shape, dtype=np.float32))
         configured.run([bindings], timeout=5000)
 
-        return bindings.output().get_buffer()
+        return bindings.output().get_buffer().flatten()
 
     def _predict_hailo(self, input_np: np.ndarray) -> tuple[int, float]:
         """Run inference with Hailo NPU backend."""
