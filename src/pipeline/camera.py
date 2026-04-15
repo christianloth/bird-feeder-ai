@@ -7,6 +7,7 @@ on stream failure.
 """
 
 import logging
+import os
 import time
 import threading
 from dataclasses import dataclass
@@ -75,6 +76,8 @@ class RTSPCamera:
             self._cap.release()
 
         # Use FFMPEG backend for RTSP — more reliable than GStreamer for capture
+        # Force TCP transport to avoid UDP packet loss and h264 decode errors
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
         self._cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
 
         # Set buffer size to 1 to always get the latest frame

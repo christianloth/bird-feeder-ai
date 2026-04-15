@@ -28,6 +28,7 @@ rtspAddress: :8554
 rtmpAddress: :1935
 hlsAddress: :8888
 webrtcAddress: :8889
+writeQueueSize: 4096
 
 paths:
   ${STREAM_NAME}:

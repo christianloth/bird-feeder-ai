@@ -72,6 +72,12 @@ class BirdPipeline:
         self.skipper = FrameSkipper(process_every_n=process_every_n)
         self.save_enabled = save_enabled
         self._source = "rtsp"  # Updated by run_on_image/run_on_video
+        self._running = False
+        self._total_detections = 0
+        self._session_factory = None
+        # Species cooldown: suppress duplicate DB saves of the same species
+        # within N seconds. One bird visit = one database record.
+        self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
 
     def _log_pipeline_config(self) -> None:
         """Log pipeline configuration at startup."""
@@ -93,13 +99,6 @@ class BirdPipeline:
             logger.info("  Storage: off (use --output for annotated output)")
         else:
             logger.info("  Storage: DISABLED (--no-save)")
-
-        self._running = False
-        self._total_detections = 0
-        self._session_factory = None
-        # Species cooldown: suppress duplicate DB saves of the same species
-        # within N seconds. One bird visit = one database record.
-        self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
 
     def _init_database(self):
         """Initialize database tables and species lookup."""
