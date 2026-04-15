@@ -703,3 +703,20 @@ if __name__ == "__main__":
     # --- Plot training history ---
     plot_training_history(combined_history, save_path=SAVE_DIR / "training_history.png")
     print("\nTraining complete!")
+
+    # --- Explicit cleanup to avoid hanging on exit ---
+    # Persistent DataLoader workers can keep the process alive after training
+    # ends. Explicitly delete them so their __del__ terminates worker procs.
+    del train_loader, val_loader, train_dataset, val_dataset
+
+    # Close any lingering matplotlib figures / backends
+    try:
+        import matplotlib.pyplot as _plt
+        _plt.close("all")
+    except ImportError:
+        pass
+
+    # Force exit — bypasses any lingering threads (e.g., tqdm's monitor thread,
+    # DataLoader worker cleanup edge cases) that would otherwise block termination.
+    import sys
+    sys.exit(0)

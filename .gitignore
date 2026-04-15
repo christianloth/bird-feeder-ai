@@ -51,3 +51,4 @@ db/
 data/
 *.log
 /.browser-sessions/
+/mediamtx/videos/
