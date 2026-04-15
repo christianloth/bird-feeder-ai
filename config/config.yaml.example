@@ -7,6 +7,10 @@ log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 # --- Camera ---
 camera:
   rtsp_url: "rtsp://admin:password@192.168.1.100:554/11"
+  # Rotate incoming RTSP frames. Positive = counterclockwise, negative = clockwise.
+  # Use 0 to disable. For 90/180/270, a fast lossless rotation is used; other
+  # angles use an affine warp (slightly slower, may add black borders).
+  rotation_degrees: 0
 
 # --- Daytime: Bird Detection (Stage 1) ---
 # YOLO model that scans each frame for birds (COCO class 14).

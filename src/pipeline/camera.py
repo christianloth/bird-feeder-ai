@@ -20,6 +20,55 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 
+def _build_rotate_fn(degrees: float):
+    """Return a function that rotates a BGR frame by `degrees`.
+
+    Positive = counterclockwise, negative = clockwise. Returns None when
+    no rotation is needed so the caller can skip the work entirely.
+
+    90/180/270 multiples use cv2.rotate (lossless, no interpolation);
+    arbitrary angles use a full affine warp that expands the canvas so
+    nothing is clipped (corners are filled with black).
+    """
+    angle = float(degrees) % 360.0
+    if angle == 0.0:
+        return None
+
+    # Fast paths for cardinal rotations. cv2.ROTATE_90_COUNTERCLOCKWISE
+    # matches "positive degrees = CCW" per the config convention.
+    if angle == 90.0:
+        return lambda f: cv2.rotate(f, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if angle == 180.0:
+        return lambda f: cv2.rotate(f, cv2.ROTATE_180)
+    if angle == 270.0:
+        return lambda f: cv2.rotate(f, cv2.ROTATE_90_CLOCKWISE)
+
+    # Arbitrary angle — build an affine matrix lazily per frame size so
+    # different-sized inputs still work. Cache by (h, w) to avoid rebuilding.
+    import math
+    cache: dict[tuple[int, int], tuple[np.ndarray, tuple[int, int]]] = {}
+
+    def rotate(frame: np.ndarray) -> np.ndarray:
+        h, w = frame.shape[:2]
+        cached = cache.get((h, w))
+        if cached is None:
+            # cv2.getRotationMatrix2D: positive angle is CCW, matches our convention.
+            center = (w / 2.0, h / 2.0)
+            matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+            cos = abs(matrix[0, 0])
+            sin = abs(matrix[0, 1])
+            new_w = int(math.ceil(h * sin + w * cos))
+            new_h = int(math.ceil(h * cos + w * sin))
+            matrix[0, 2] += (new_w / 2.0) - center[0]
+            matrix[1, 2] += (new_h / 2.0) - center[1]
+            cached = (matrix, (new_w, new_h))
+            cache[(h, w)] = cached
+        matrix, size = cached
+        return cv2.warpAffine(frame, matrix, size, flags=cv2.INTER_LINEAR)
+
+    return rotate
+
+
 @dataclass
 class FrameResult:
     """A captured frame with metadata."""
@@ -43,16 +92,28 @@ class RTSPCamera:
         rtsp_url: str | None = None,
         reconnect_delay: float = 5.0,
         max_reconnect_attempts: int = 0,
+        rotation_degrees: float | None = None,
     ):
         """
         Args:
             rtsp_url: RTSP stream URL. Defaults to config value.
             reconnect_delay: Seconds to wait before reconnecting on failure.
             max_reconnect_attempts: Max reconnection attempts (0 = unlimited).
+            rotation_degrees: Rotate frames by this angle. Positive values are
+                counterclockwise, negative are clockwise. Defaults to config
+                value. 0 disables rotation.
         """
         self.rtsp_url = rtsp_url or settings.rtsp_url
         self.reconnect_delay = reconnect_delay
         self.max_reconnect_attempts = max_reconnect_attempts
+        rotation = (
+            rotation_degrees
+            if rotation_degrees is not None
+            else settings.rotation_degrees
+        )
+        self._rotate_fn = _build_rotate_fn(rotation)
+        if self._rotate_fn is not None:
+            logger.info(f"Frame rotation enabled: {rotation}°")
 
         self._cap: cv2.VideoCapture | None = None
         self._frame: np.ndarray | None = None
@@ -129,6 +190,9 @@ class RTSPCamera:
                 logger.warning("Failed to read frame, connection may be lost")
                 self._connected = False
                 continue
+
+            if self._rotate_fn is not None:
+                frame = self._rotate_fn(frame)
 
             with self._frame_lock:
                 self._frame = frame

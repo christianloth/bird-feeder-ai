@@ -46,6 +46,9 @@ class Settings:
 
     # Camera
     rtsp_url: str = _camera.get("rtsp_url", "rtsp://admin:password@192.168.1.100:554/11")
+    # Rotate incoming RTSP frames by this angle in degrees.
+    # Positive = counterclockwise, negative = clockwise. 0 disables rotation.
+    rotation_degrees: float = _camera.get("rotation_degrees", 0.0)
 
     # Daytime: Bird Detection (Stage 1 — YOLO finds birds)
     detection_model: str = _bird_detection.get("model", "")
