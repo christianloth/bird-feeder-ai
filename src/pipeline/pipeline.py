@@ -952,6 +952,10 @@ if __name__ == "__main__":
     else:
         save_enabled = not args.no_save
 
+    # --day implies --no-night (no point loading wildlife model if forcing daytime)
+    if args.day:
+        args.no_night = True
+
     if args.mode == "dev":
         pipeline = create_pipeline_dev(
             checkpoint_path=args.checkpoint,
