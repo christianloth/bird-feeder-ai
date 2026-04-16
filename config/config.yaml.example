@@ -17,6 +17,7 @@ camera:
 # This only answers "is there a bird?" and draws a bounding box. REQUIRED.
 bird_detection:
   model: "models/base-models/yolo11n.pt"
+  hef_model: "yolov11s.hef"   # HEF model filename in models/hef/ for Hailo NPU
   confidence_threshold: 0.4   # min confidence to consider a YOLO detection a bird
   bird_class_id: 14            # COCO class 14 = "bird"
 

@@ -251,7 +251,11 @@ class BirdPipeline:
         t0 = time.perf_counter()
         bboxes, confidences = self.detector.detect(frame)
         det_ms = (time.perf_counter() - t0) * 1000
-        logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms")
+        if bboxes:
+            confs_str = ", ".join(f"{c:.2f}" for c in confidences)
+            logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms (YOLO conf: [{confs_str}])")
+        else:
+            logger.debug(f"Detection: 0 birds in {det_ms:.1f}ms")
 
         # 2. Update tracker — returns all active tracks not yet confidently
         #    classified (both new tracks and existing ones being retried)

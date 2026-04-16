@@ -52,6 +52,7 @@ class Settings:
 
     # Daytime: Bird Detection (Stage 1 — YOLO finds birds)
     detection_model: str = _bird_detection.get("model", "")
+    detection_hef: str = _bird_detection.get("hef_model", "")
     detection_model_path: Path = field(default=None)  # Hailo HEF path
     detection_confidence_threshold: float = _bird_detection.get("confidence_threshold", 0.4)
     bird_class_id: int = _bird_detection.get("bird_class_id", 14)
@@ -99,7 +100,7 @@ class Settings:
         if self.detection_model_path is None:
             object.__setattr__(
                 self, "detection_model_path",
-                self.models_dir / "hef" / "yolov11n.hef",
+                self.models_dir / "hef" / self.detection_hef,
             )
         if self.classifier_model_path is None:
             object.__setattr__(
