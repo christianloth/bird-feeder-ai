@@ -46,6 +46,7 @@ class Settings:
 
     # Camera
     rtsp_url: str = _camera.get("rtsp_url", "rtsp://admin:password@192.168.1.100:554/11")
+    camera_codec: str = _camera.get("codec", "")
     # Rotate incoming RTSP frames by this angle in degrees.
     # Positive = counterclockwise, negative = clockwise. 0 disables rotation.
     rotation_degrees: float = _camera.get("rotation_degrees", 0.0)

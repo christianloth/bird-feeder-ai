@@ -131,20 +131,43 @@ class RTSPCamera:
     def frame_number(self) -> int:
         return self._frame_number
 
+    def _build_gstreamer_pipeline(self) -> str:
+        """Build a GStreamer pipeline string for H.265 RTSP via software decode.
+
+        The v4l2slh265dec hardware decoder outputs tiled NV12_128C8 via DMABuf
+        and the glupload/gldownload GL path silently produced all-black frames
+        on this setup. Falling back to avdec_h265 (libav software decode) gives
+        correct pixel data; the tradeoff is higher CPU use than the broken HW
+        path, but still benefits from GStreamer's threading vs CAP_FFMPEG.
+        """
+        return (
+            f'rtspsrc location="{self.rtsp_url}" latency=200 protocols=tcp ! '
+            "rtph265depay ! h265parse ! avdec_h265 ! "
+            "videoconvert ! video/x-raw,format=BGR ! "
+            "appsink drop=true max-buffers=1 sync=false"
+        )
+
     def connect(self) -> bool:
         """Open the RTSP stream. Returns True if successful."""
         if self._cap is not None:
             self._cap.release()
 
-        # Use FFMPEG backend for RTSP — more reliable than GStreamer for capture
-        # Force TCP transport to avoid UDP packet loss and h264 decode errors
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        self._cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-
-        # Set buffer size to 1 to always get the latest frame
-        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if settings.camera_codec == "h265":
+            # H.265 via GStreamer (software decode via avdec_h265).
+            # HW decode path via v4l2slh265dec silently produced black frames.
+            pipeline = self._build_gstreamer_pipeline()
+            logger.info("Using H.265 software decode (GStreamer + avdec_h265)")
+            logger.debug(f"GStreamer pipeline: {pipeline}")
+            self._cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        else:
+            # H.264 via FFMPEG — software decode on CPU
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+            logger.info("Using H.264 software decode (FFMPEG)")
+            self._cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         if self._cap.isOpened():
+            # GStreamer may not report dimensions until first frame is read
             width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = self._cap.get(cv2.CAP_PROP_FPS)
@@ -238,7 +261,11 @@ class RTSPCamera:
         with self._frame_lock:
             if self._frame is None:
                 return None
-            frame = self._frame.copy()
+            # Safe to return the reference directly because _grab_loop always
+            # rebinds self._frame to a fresh ndarray (cv2.read + cv2.rotate
+            # both return new arrays) and never mutates the previous one.
+            # Downstream consumers MUST NOT mutate this frame in place.
+            frame = self._frame
             number = self._frame_number
 
         h, w = frame.shape[:2]

@@ -96,6 +96,13 @@ uv venv --python /usr/bin/python --system-site-packages .venv
 uv sync
 ```
 
+If `import cv2` fails inside the venv (the `--system-site-packages` flag doesn't always expose it reliably), symlink the system OpenCV into the venv:
+
+```bash
+ln -sf /usr/lib/python3/dist-packages/cv2.cpython-313-aarch64-linux-gnu.so \
+       .venv/lib/python3.13/site-packages/
+```
+
 ### Install with pip
 
 ```bash

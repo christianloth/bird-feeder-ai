@@ -7,6 +7,13 @@ log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 # --- Camera ---
 camera:
   rtsp_url: "rtsp://admin:password@192.168.1.100:554/11"
+  # "h264" = software decode via FFMPEG (OpenCV CAP_FFMPEG).
+  # "h265" = software decode via GStreamer (avdec_h265). Camera must output H.265.
+  # NOTE: VideoCore VII HW H.265 decode (v4l2slh265dec) is currently broken on
+  # this stack (Debian Trixie + Mesa 25.0.7 + GStreamer 1.26.2) — the GL detile
+  # path silently produces all-black frames in headless sessions. See memory
+  # project_h265_hw_decode_failed.md for retry conditions.
+  codec: "h264"
   # Rotate incoming RTSP frames. Positive = counterclockwise, negative = clockwise.
   # Use 0 to disable. For 90/180/270, a fast lossless rotation is used; other
   # angles use an affine warp (slightly slower, may add black borders).
