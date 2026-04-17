@@ -293,7 +293,7 @@ class BirdPipeline:
 
             logger.debug(
                 f"Classification: {species_name} ({conf:.2f}) in {cls_ms:.1f}ms "
-                f"[attempt {track.classify_count}, avg of {track.classify_count}]"
+                f"[attempt {track.classify_count}, track seen {track.frame_count}x]"
             )
 
             # Check if we've crossed the confidence threshold
@@ -309,7 +309,7 @@ class BirdPipeline:
                     self._save_detection(
                         frame, track.bbox, species_name, conf, dt,
                         detection_model=Path(settings.detection_model).stem,
-                        classifier_model="vit_small_nabirds",
+                        classifier_model=settings.classifier_model_path.stem,
                         source=self._source,
                     )
 
