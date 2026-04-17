@@ -34,6 +34,7 @@ bird_detection:
 # ViT-Small chosen for fine-grained classification — self-attention captures
 # long-range relationships between discriminative bird features (bill ↔ tail).
 species_classification:
+  hef_model: "vit_small_birds.hef"  # HEF model filename in models/hef/
   confidence_threshold: 0.60  # min confidence to accept a species prediction
 
 # --- Nighttime: Wildlife Detection (single-stage) ---

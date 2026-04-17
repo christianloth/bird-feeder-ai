@@ -58,7 +58,8 @@ class Settings:
     detection_confidence_threshold: float = _bird_detection.get("confidence_threshold", 0.4)
     bird_class_id: int = _bird_detection.get("bird_class_id", 14)
 
-    # Daytime: Species Classification (Stage 2 — ViT-Small classifies species)
+    # Daytime: Species Classification (Stage 2 — ViT classifies species)
+    classifier_hef: str = _species_classification.get("hef_model", "")
     classifier_model_path: Path = field(default=None)  # Hailo HEF path
     classification_confidence_threshold: float = _species_classification.get("confidence_threshold", 0.30)
     num_species: int = 555  # NABirds dataset
@@ -106,7 +107,7 @@ class Settings:
         if self.classifier_model_path is None:
             object.__setattr__(
                 self, "classifier_model_path",
-                self.models_dir / "hef" / "vit_small_birds.hef",
+                self.models_dir / "hef" / self.classifier_hef,
             )
         if self.wildlife_model_path is None:
             object.__setattr__(
