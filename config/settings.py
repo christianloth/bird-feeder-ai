@@ -79,7 +79,7 @@ class Settings:
 
     # Pipeline
     process_every_n: int = _pipeline.get("process_every_n", 5)
-    species_cooldown_seconds: int = _pipeline["species_cooldown_seconds"]
+    species_cooldown_seconds: int = _pipeline.get("species_cooldown_seconds", 120)
 
     # Database
     database_url: str = f"sqlite:///{_PROJECT_ROOT / 'db' / 'birds.db'}"
