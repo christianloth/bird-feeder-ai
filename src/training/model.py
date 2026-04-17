@@ -1,5 +1,5 @@
 """
-YOUR CODE: Transfer Learning with ViT-Small / EfficientNet-Lite4
+YOUR CODE: Transfer Learning with ViT-Small / ViT-Base / EfficientNet-Lite4
 
 Transfer learning is the key insight that makes this project feasible:
 instead of training a model from scratch (which would need millions of images),
@@ -26,6 +26,18 @@ SUPPORTED MODELS:
     Training strategy: SINGLE-PHASE end-to-end with lower LR + warmup for
     transformer stability.
 
+  ViT-Base ARCHITECTURE (higher-capacity alternative):
+    Input (3, 224, 224)
+        → patch_embed: split image into 14x14 grid of 16x16 patches → 196 tokens
+        → 12 transformer encoder blocks (dim=768, 12 heads) with self-attention
+        → head (classifier): Linear(768, 1000)  ← WE REPLACE THIS
+
+    Large (86.5M params). Same patch grid as ViT-Small but wider hidden dim
+    and more attention heads — should yield higher accuracy at ~4x the params
+    and ~2x the memory. Hailo Model Zoo reports 84.5% float / 83.6% hardware
+    top-1 on ImageNet-1K at 57 FPS (single pass) on Hailo10H.
+    Training strategy: same as ViT-Small (low LR, end-to-end).
+
   EfficientNet-Lite4 ARCHITECTURE (runner-up — CNN alternative):
     Input (3, 300, 300)
         → features (backbone): compound-scaled blocks with ReLU6 (no SE blocks) → (1280, 10, 10)
@@ -51,6 +63,7 @@ WHY EfficientNet-Lite4? (runner-up)
 
 DOCS:
 - https://huggingface.co/timm/vit_small_patch16_224.augreg_in21k_ft_in1k
+- https://huggingface.co/timm/vit_base_patch16_224.augreg_in21k_ft_in1k
 - https://github.com/huggingface/pytorch-image-models
 - https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 """
@@ -65,6 +78,12 @@ MODEL_CONFIGS: dict[str, dict] = {
         "feature_dim": 384,
         "dropout": 0.1,
         "timm_model": "vit_small_patch16_224.augreg_in21k_ft_in1k",
+    },
+    "vit_base": {
+        "input_size": 224,
+        "feature_dim": 768,
+        "dropout": 0.1,
+        "timm_model": "vit_base_patch16_224.augreg_in21k_ft_in1k",
     },
     "efficientnet_lite4": {
         "input_size": 300,
@@ -97,7 +116,7 @@ def create_model(
         num_classes: Number of bird species (555 for NABirds)
         pretrained: Load ImageNet pretrained weights (via timm)
         freeze_backbone: If True, freeze the feature extraction layers
-        model_name: Which architecture — "vit_small" or "efficientnet_lite4"
+        model_name: Which architecture — "vit_small", "vit_base", or "efficientnet_lite4"
 
     Returns:
         Modified model with new classifier head

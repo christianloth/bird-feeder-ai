@@ -550,7 +550,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train bird species classifier")
     parser.add_argument(
         "--model", type=str, default="vit_small",
-        choices=["vit_small", "efficientnet_lite4"],
+        choices=["vit_small", "vit_base", "efficientnet_lite4"],
         help="model architecture (default: vit_small)",
     )
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
@@ -566,9 +566,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Preprocessed data is baked at a fixed resolution — only works with ViT-Small (224x224)
-    if args.preprocessed and args.model != "vit_small":
-        parser.error("--preprocessed only works with vit_small (images were preprocessed at 224x224)")
+    # Preprocessed data is baked at 224x224 — works with any 224-input model (ViT-Small/ViT-Base)
+    if args.preprocessed and args.model not in ("vit_small", "vit_base"):
+        parser.error("--preprocessed requires a 224x224 model (vit_small or vit_base)")
 
     # Look up model-specific config (input size, etc.)
     model_config = get_model_config(args.model)
@@ -644,9 +644,9 @@ if __name__ == "__main__":
 
     # --- Training strategy ---
     #
-    # Both architectures use single-phase end-to-end training.
+    # All architectures use single-phase end-to-end training.
     #
-    # ViT-Small: Lower learning rate (1e-4) with warmup for transformer stability.
+    # ViT-Small / ViT-Base: Lower learning rate (1e-4) with ReduceLROnPlateau.
     #   ViTs are sensitive to high initial LR — warmup prevents early divergence.
     #   ReduceLROnPlateau adapts when val accuracy stalls.
     #
@@ -666,6 +666,28 @@ if __name__ == "__main__":
         model = create_model(
             num_classes=train_dataset.num_classes, pretrained=True,
             freeze_backbone=False, model_name="vit_small",
+        )
+        params = count_parameters(model)
+        print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+
+        combined_history = train(
+            model, train_loader, val_loader,
+            num_epochs=30, learning_rate=0.0001, save_dir=SAVE_DIR,
+            class_names=class_names, use_amp=args.amp,
+            resume_from=resume_path,
+            scheduler_type="reduce_on_plateau",
+            patience=5,
+        )
+
+    elif args.model == "vit_base":
+        # --- ViT-Base: end-to-end with lower LR ---
+        # Same training recipe as ViT-Small — just a wider/deeper transformer
+        # (dim=768, 12 heads, 86.5M params). ImageNet-21K pretrained weights
+        # via timm augreg provide the starting point.
+        print("\n=== Training ViT-Base end-to-end ===")
+        model = create_model(
+            num_classes=train_dataset.num_classes, pretrained=True,
+            freeze_backbone=False, model_name="vit_base",
         )
         params = count_parameters(model)
         print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")

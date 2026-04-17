@@ -7,7 +7,7 @@ DFC compiler can convert to HEF for the NPU. The chain is:
     PyTorch (.pth) → ONNX (.onnx) → Hailo DFC → HEF (.hef)
 
 Supports two model types:
-- Classification (ViT-Small, EfficientNet-Lite4): custom training checkpoint
+- Classification (ViT-Small, ViT-Base, EfficientNet-Lite4): custom training checkpoint
 - YOLO detection (YOLOv8n, YOLO11s, etc.): Ultralytics .pt file
 
 WHAT TO LEARN:
@@ -32,13 +32,13 @@ def export_classifier_to_onnx(
     opset_version: int = 17,
 ) -> Path:
     """
-    Export a trained classification model (ViT-Small/EfficientNet-Lite4) to ONNX.
+    Export a trained classification model (ViT-Small/ViT-Base/EfficientNet-Lite4) to ONNX.
 
     Args:
         model: Trained classifier model.
         output_path: Where to save the .onnx file.
         num_classes: Number of output classes.
-        input_size: Input image dimension (224 for ViT-Small, 300 for EfficientNet-Lite4).
+        input_size: Input image dimension (224 for ViT-Small/ViT-Base, 300 for EfficientNet-Lite4).
         opset_version: ONNX opset (17 for ViT — matches Hailo Model Zoo).
 
     Returns:
@@ -150,11 +150,11 @@ if __name__ == "__main__":
     # --- Classifier subcommand ---
     cls_parser = subparsers.add_parser(
         "classifier",
-        help="Export a classification model (ViT-Small, EfficientNet-Lite4)",
+        help="Export a classification model (ViT-Small, ViT-Base, EfficientNet-Lite4)",
     )
     cls_parser.add_argument(
         "--model", type=str, default="vit_small",
-        choices=["vit_small", "efficientnet_lite4"],
+        choices=["vit_small", "vit_base", "efficientnet_lite4"],
         help="Model architecture (default: vit_small)",
     )
     cls_parser.add_argument(
