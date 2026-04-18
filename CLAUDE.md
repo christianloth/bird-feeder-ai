@@ -4,7 +4,7 @@
 24/7 bird species detection and tracking system. Raspberry Pi 5 + AI HAT+ 2 (Hailo-10H, 40 TOPS INT4 / 20 TOPS INT8) + SV3C 4K PTZ camera at a bird feeder in Frisco, TX.
 
 ## Architecture
-Two-stage pipeline: YOLOv8n (detection, COCO class 14) → MobileNetV2 (species classification, fine-tuned on NABirds). Both run on Hailo-10H NPU. FastAPI backend with SQLite. BirdNET for optional audio classification.
+Two-stage pipeline: YOLO11n (detection, COCO class 14) → ViT-Small (species classification, fine-tuned on NABirds). Both run on Hailo-10H NPU (single pass each). EfficientNet-Lite4 available as an alternative CNN classifier. FastAPI backend with SQLite. BirdNET for optional audio classification.
 
 ## Important
 - The `src/training/` files (dataset.py, transforms.py, model.py, train.py, evaluate.py) are designed for the user to implement themselves as a PyTorch learning exercise. Each file has detailed TODO comments. Do NOT fill in the implementations unless explicitly asked.

@@ -46,14 +46,20 @@ class Settings:
 
     # Camera
     rtsp_url: str = _camera.get("rtsp_url", "rtsp://admin:password@192.168.1.100:554/11")
+    camera_codec: str = _camera.get("codec", "")
+    # Rotate incoming RTSP frames by this angle in degrees.
+    # Positive = counterclockwise, negative = clockwise. 0 disables rotation.
+    rotation_degrees: float = _camera.get("rotation_degrees", 0.0)
 
     # Daytime: Bird Detection (Stage 1 — YOLO finds birds)
     detection_model: str = _bird_detection.get("model", "")
+    detection_hef: str = _bird_detection.get("hef_model", "")
     detection_model_path: Path = field(default=None)  # Hailo HEF path
     detection_confidence_threshold: float = _bird_detection.get("confidence_threshold", 0.4)
     bird_class_id: int = _bird_detection.get("bird_class_id", 14)
 
-    # Daytime: Species Classification (Stage 2 — EfficientNet classifies species)
+    # Daytime: Species Classification (Stage 2 — ViT classifies species)
+    classifier_hef: str = _species_classification.get("hef_model", "")
     classifier_model_path: Path = field(default=None)  # Hailo HEF path
     classification_confidence_threshold: float = _species_classification.get("confidence_threshold", 0.30)
     num_species: int = 555  # NABirds dataset
@@ -74,7 +80,7 @@ class Settings:
 
     # Pipeline
     process_every_n: int = _pipeline.get("process_every_n", 5)
-    species_cooldown_seconds: int = _pipeline["species_cooldown_seconds"]
+    species_cooldown_seconds: int = _pipeline.get("species_cooldown_seconds", 120)
 
     # Database
     database_url: str = f"sqlite:///{_PROJECT_ROOT / 'db' / 'birds.db'}"
@@ -96,12 +102,12 @@ class Settings:
         if self.detection_model_path is None:
             object.__setattr__(
                 self, "detection_model_path",
-                self.models_dir / "hef" / "yolov11n.hef",
+                self.models_dir / "hef" / self.detection_hef,
             )
         if self.classifier_model_path is None:
             object.__setattr__(
                 self, "classifier_model_path",
-                self.models_dir / "hef" / "efficientnet_b2_birds.hef",
+                self.models_dir / "hef" / self.classifier_hef,
             )
         if self.wildlife_model_path is None:
             object.__setattr__(

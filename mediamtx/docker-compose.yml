@@ -1,0 +1,16 @@
+services:
+  rtsp:
+    build: .
+    ports:
+      - "8554:8554"   # RTSP
+      - "8888:8888"   # HLS (optional — view in browser)
+    volumes:
+      - ./videos:/videos:ro
+    environment:
+      # Path to the video file inside the container (mounted under /videos)
+      - VIDEO_FILE=/videos/${VIDEO_FILE:-sample.mp4}
+      # Target FPS (leave empty for native frame rate)
+      - FPS=${FPS:-}
+      # RTSP path name — stream will be at rtsp://localhost:8554/<name>
+      - STREAM_NAME=${STREAM_NAME:-stream}
+    restart: unless-stopped

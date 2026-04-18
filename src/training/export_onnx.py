@@ -7,7 +7,7 @@ DFC compiler can convert to HEF for the NPU. The chain is:
     PyTorch (.pth) → ONNX (.onnx) → Hailo DFC → HEF (.hef)
 
 Supports two model types:
-- Classification (EfficientNet-B2, MobileNetV2): custom training checkpoint
+- Classification (ViT-Small, ViT-Base, EfficientNet-Lite4): custom training checkpoint
 - YOLO detection (YOLOv8n, YOLO11s, etc.): Ultralytics .pt file
 
 WHAT TO LEARN:
@@ -29,17 +29,17 @@ def export_classifier_to_onnx(
     output_path: str | Path,
     num_classes: int,
     input_size: int = 224,
-    opset_version: int = 11,
+    opset_version: int = 17,
 ) -> Path:
     """
-    Export a trained classification model (MobileNetV2/EfficientNet) to ONNX.
+    Export a trained classification model (ViT-Small/ViT-Base/EfficientNet-Lite4) to ONNX.
 
     Args:
         model: Trained classifier model.
         output_path: Where to save the .onnx file.
         num_classes: Number of output classes.
-        input_size: Input image dimension (224 for MobileNetV2, 260 for EfficientNet-B2).
-        opset_version: ONNX opset (11 recommended for Hailo).
+        input_size: Input image dimension (224 for ViT-Small/ViT-Base, 300 for EfficientNet-Lite4).
+        opset_version: ONNX opset (17 for ViT — matches Hailo Model Zoo).
 
     Returns:
         Path to the exported ONNX file.
@@ -150,12 +150,12 @@ if __name__ == "__main__":
     # --- Classifier subcommand ---
     cls_parser = subparsers.add_parser(
         "classifier",
-        help="Export a classification model (MobileNetV2, EfficientNet-B2)",
+        help="Export a classification model (ViT-Small, ViT-Base, EfficientNet-Lite4)",
     )
     cls_parser.add_argument(
-        "--model", type=str, default="efficientnet_b2",
-        choices=["mobilenetv2", "efficientnet_b2"],
-        help="Model architecture (default: efficientnet_b2)",
+        "--model", type=str, default="vit_small",
+        choices=["vit_small", "vit_base", "efficientnet_lite4"],
+        help="Model architecture (default: vit_small)",
     )
     cls_parser.add_argument(
         "--checkpoint", type=str, default=None,

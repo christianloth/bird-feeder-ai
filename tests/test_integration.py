@@ -56,7 +56,7 @@ def test_full_detection_flow_in_database():
                 species_id=cardinal.id,
                 confidence=0.94,
                 detection_model="yolov8n",
-                classifier_model="mobilenetv2",
+                classifier_model="vit_small",
                 bbox_x1=100, bbox_y1=150, bbox_x2=250, bbox_y2=350,
             ),
             Detection(
@@ -64,14 +64,14 @@ def test_full_detection_flow_in_database():
                 species_id=cardinal.id,
                 confidence=0.91,
                 detection_model="yolov8n",
-                classifier_model="mobilenetv2",
+                classifier_model="vit_small",
             ),
             Detection(
                 timestamp=datetime(2025, 6, 15, 10, 45),
                 species_id=blue_jay.id,
                 confidence=0.88,
                 detection_model="yolov8n",
-                classifier_model="mobilenetv2",
+                classifier_model="vit_small",
             ),
         ]
         session.add_all(detections)

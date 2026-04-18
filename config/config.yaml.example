@@ -7,19 +7,34 @@ log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 # --- Camera ---
 camera:
   rtsp_url: "rtsp://admin:password@192.168.1.100:554/11"
+  # "h264" = software decode via FFMPEG (OpenCV CAP_FFMPEG).
+  # "h265" = software decode via GStreamer (avdec_h265). Camera must output H.265.
+  # NOTE: VideoCore VII HW H.265 decode (v4l2slh265dec) is currently broken on
+  # this stack (Debian Trixie + Mesa 25.0.7 + GStreamer 1.26.2) — the GL detile
+  # path silently produces all-black frames in headless sessions. See memory
+  # project_h265_hw_decode_failed.md for retry conditions.
+  codec: "h264"
+  # Rotate incoming RTSP frames. Positive = counterclockwise, negative = clockwise.
+  # Use 0 to disable. For 90/180/270, a fast lossless rotation is used; other
+  # angles use an affine warp (slightly slower, may add black borders).
+  rotation_degrees: 0
 
 # --- Daytime: Bird Detection (Stage 1) ---
 # YOLO model that scans each frame for birds (COCO class 14).
 # This only answers "is there a bird?" and draws a bounding box. REQUIRED.
 bird_detection:
   model: "models/base-models/yolo11n.pt"
+  hef_model: "yolov11s.hef"   # HEF model filename in models/hef/ for Hailo NPU
   confidence_threshold: 0.4   # min confidence to consider a YOLO detection a bird
   bird_class_id: 14            # COCO class 14 = "bird"
 
 # --- Daytime: Species Classification (Stage 2) ---
-# EfficientNet-B2 classifier that takes the cropped bird from Stage 1
+# ViT-Small classifier that takes the cropped bird from Stage 1
 # and predicts which of 555 NABirds species it is.
+# ViT-Small chosen for fine-grained classification — self-attention captures
+# long-range relationships between discriminative bird features (bill ↔ tail).
 species_classification:
+  hef_model: "vit_small_birds.hef"  # HEF model filename in models/hef/
   confidence_threshold: 0.60  # min confidence to accept a species prediction
 
 # --- Nighttime: Wildlife Detection (single-stage) ---
@@ -37,7 +52,8 @@ day_night:
 
 # --- Pipeline ---
 pipeline:
-  process_every_n: 5  # Process every Nth frame (higher = less CPU)
+  process_every_n: 5             # Process every Nth frame (higher = less CPU)
+  species_cooldown_seconds: 120  # Suppress duplicate DB saves of same species for N seconds
 
 # --- Location (for sunrise/sunset calculation) ---
 location:

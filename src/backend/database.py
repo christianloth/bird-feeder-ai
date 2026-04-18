@@ -160,30 +160,34 @@ def get_session(engine=None) -> Session:
     return factory()
 
 
-def load_species_from_dataset(session: Session, classes_file: Path) -> None:
+def load_species_from_dataset(session: Session, nabirds_dir: Path) -> None:
     """
-    Load species from the NABirds classes.txt file into the database.
+    Load species from the NABirds dataset into the database.
+
+    Uses NABirdsDataset to derive the same contiguous class index mapping
+    (0..N-1) that the classifier was trained with, so that class_index
+    values in the DB match the model's output indices.
 
     Args:
         session: Active database session
-        classes_file: Path to NABirds classes.txt (format: "class_id species_name")
+        nabirds_dir: Path to the nabirds/ root directory
     """
     existing = session.query(Species).filter(Species.category == "bird").count()
     if existing > 0:
         return
 
-    with open(classes_file) as f:
-        for idx, line in enumerate(f):
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2:
-                original_class_id, name = parts
-                species = Species(
-                    common_name=name,
-                    scientific_name=name,
-                    class_index=idx,
-                    category="bird",
-                )
-                session.add(species)
+    from src.training.dataset import NABirdsDataset
+    from src.training.transforms import get_val_transforms
+
+    dataset = NABirdsDataset(nabirds_dir, split="train", transform=get_val_transforms())
+    for class_idx, species_name in dataset.class_to_species.items():
+        species = Species(
+            common_name=species_name,
+            scientific_name=species_name,
+            class_index=class_idx,
+            category="bird",
+        )
+        session.add(species)
 
     session.commit()
 

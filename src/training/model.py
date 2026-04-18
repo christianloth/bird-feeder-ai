@@ -1,5 +1,5 @@
 """
-YOUR CODE: Transfer Learning with MobileNetV2 / EfficientNet-B2
+YOUR CODE: Transfer Learning with ViT-Small / ViT-Base / EfficientNet-Lite4
 
 Transfer learning is the key insight that makes this project feasible:
 instead of training a model from scratch (which would need millions of images),
@@ -11,99 +11,85 @@ WHAT TO LEARN:
 - The backbone has already learned to detect edges, textures, shapes, eyes, feathers, etc.
 - We replace the head with our own (for 555 bird species instead of 1000 ImageNet classes)
 - "Freezing" means setting requires_grad=False — those weights won't update during training
-- Strategy: freeze backbone first (train only the head), then unfreeze and fine-tune everything
 
 SUPPORTED MODELS:
 
-  MobileNetV2 ARCHITECTURE:
+  ViT-Small ARCHITECTURE (primary — best for fine-grained bird classification):
     Input (3, 224, 224)
-        → features (backbone): 18 inverted residual blocks → (1280, 7, 7)
-        → avgpool: (1280, 7, 7) → (1280,)
+        → patch_embed: split image into 14x14 grid of 16x16 patches → 196 tokens
+        → 12 transformer encoder blocks (dim=384, 6 heads) with self-attention
+        → head (classifier): Linear(384, 1000)  ← WE REPLACE THIS
+
+    Medium (21.1M params). Self-attention captures long-range relationships between
+    distant bird features (e.g., bill shape ↔ tail pattern). Validated on NABirds:
+    ViT achieves 89.9% on NABirds (He et al., TransFG, AAAI 2022).
+    Training strategy: SINGLE-PHASE end-to-end with lower LR + warmup for
+    transformer stability.
+
+  ViT-Base ARCHITECTURE (higher-capacity alternative):
+    Input (3, 224, 224)
+        → patch_embed: split image into 14x14 grid of 16x16 patches → 196 tokens
+        → 12 transformer encoder blocks (dim=768, 12 heads) with self-attention
+        → head (classifier): Linear(768, 1000)  ← WE REPLACE THIS
+
+    Large (86.5M params). Same patch grid as ViT-Small but wider hidden dim
+    and more attention heads — should yield higher accuracy at ~4x the params
+    and ~2x the memory. Hailo Model Zoo reports 84.5% float / 83.6% hardware
+    top-1 on ImageNet-1K at 57 FPS (single pass) on Hailo10H.
+    Training strategy: same as ViT-Small (low LR, end-to-end).
+
+  EfficientNet-Lite4 ARCHITECTURE (runner-up — CNN alternative):
+    Input (3, 300, 300)
+        → features (backbone): compound-scaled blocks with ReLU6 (no SE blocks) → (1280, 10, 10)
+        → avgpool: (1280, 10, 10) → (1280,)
         → classifier (head): Linear(1280, 1000)  ← WE REPLACE THIS
 
-    Small (3.4M params), designed for mobile/edge — perfect for Raspberry Pi + Hailo NPU.
-    Training strategy: TWO-PHASE (freeze backbone → unfreeze late layers with lower LR).
+    Medium (13.0M params), 300x300 resolution captures fine plumage detail.
+    Hardware-friendly: no squeeze-and-excitation blocks, ReLU6 instead of swish.
+    Runs in a single pass on Hailo-10H NPU (confirmed in Hailo Model Zoo).
+    Training strategy: SINGLE-PHASE end-to-end.
 
-  EfficientNet-B2 ARCHITECTURE:
-    Input (3, 260, 260)
-        → features (backbone): 8 compound-scaled blocks → (1408, 9, 9)
-        → avgpool: (1408, 9, 9) → (1408,)
-        → classifier (head): Linear(1408, 1000)  ← WE REPLACE THIS
+WHY ViT-Small? (primary)
+- Self-attention excels at fine-grained classification (TransFG, AAAI 2022)
+- Multi-head attention naturally discovers discriminative bird body parts
+- 80.5% HW accuracy on Hailo-10H at 116 FPS (single pass, confirmed)
+- Validated on NABirds — the exact dataset this project uses
 
-    Larger (7.8M params), higher accuracy via compound scaling (depth + width + resolution).
-    Training strategy: SINGLE-PHASE (train end-to-end, no freezing needed — the larger
-    architecture is robust enough to handle gradients from the untrained head).
-
-WHAT EACH LAYER GROUP "SEES" (MobileNetV2, similar concept applies to EfficientNet-B2):
-    Before fine-tuning (pretrained on ImageNet — 1000 generic classes like "bus", "pizza", "tabby cat"):
-
-    Layers 0-6  (early):  Edges, corners, textures, basic color gradients
-                           → These are UNIVERSAL visual features. A feather edge looks
-                             the same whether you're classifying birds or cars.
-                           → Barely change during fine-tuning. Stay frozen.
-
-    Layers 7-13 (middle): Shapes, patterns, eyes, repeated textures
-                           → Slightly more task-specific but still broadly useful.
-                           → Minor adaptation during fine-tuning. Stay frozen.
-
-    Layers 14-17 (late):  High-level semantic features — "object parts"
-                           → BEFORE fine-tuning: generic parts (wheels, fur, petals)
-                           → AFTER fine-tuning: bird-specific parts (beak shapes,
-                             breast streaking, wing bars, eye rings)
-                           → These are the layers we UNFREEZE in Phase 2.
-
-    Classifier head:       The final decision layer
-                           → BEFORE: 1000 ImageNet classes (bus, pizza, robin, ...)
-                           → AFTER: 555 NABirds species (House Finch, Purple Finch, ...)
-                           → Completely REPLACED — this is the first thing we train.
-
-    This is called "catastrophic forgetting" — and here it's INTENTIONAL.
-    After fine-tuning, the model will NOT recognize "school bus" or "pizza" anymore.
-    But it WILL distinguish a House Finch from a Purple Finch.
-
-    Think of it like a general handyman retraining as a specialized electrician:
-    they don't forget how to use a screwdriver (early layers), but they stop
-    thinking about plumbing (old classifier) and develop deep expertise in
-    wiring (bird-specific features).
-
-WHY MobileNetV2?
-- Small (3.4M params) — trains fast, converts well to Hailo
-- Designed for mobile/edge — perfect for Raspberry Pi
-- Depthwise separable convolutions — efficient but still accurate
-- Google uses it for their official iNaturalist bird classifier on Coral TPU
-- Well-documented with tons of transfer learning tutorials
-
-WHY EfficientNet-B2?
-- Higher accuracy than MobileNetV2 (compound scaling: depth + width + resolution)
-- Still relatively small (7.8M params) — practical for fine-tuning on a single GPU
-- Proven on bird classification: 99% accuracy on 525 species (Dennis Joostel's project)
-- Robust to end-to-end training — no need for careful two-phase freeze/unfreeze
+WHY EfficientNet-Lite4? (runner-up)
+- CNN with different error profile vs ViT (complementary strengths)
+- 300x300 resolution — more pixels on fine plumage details
+- 80.1% HW accuracy on Hailo-10H at 137 FPS (single pass, confirmed)
+- Designed for edge accelerators — no SE blocks that cause multi-pass issues
 
 DOCS:
-- https://pytorch.org/vision/stable/models/mobilenetv2.html
-- https://pytorch.org/vision/stable/models/efficientnet.html
+- https://huggingface.co/timm/vit_small_patch16_224.augreg_in21k_ft_in1k
+- https://huggingface.co/timm/vit_base_patch16_224.augreg_in21k_ft_in1k
+- https://github.com/huggingface/pytorch-image-models
 - https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 """
 
 import torch.nn as nn
-from torchvision import models
 
 # Model configurations — the single source of truth for each architecture.
 # When you add a new model, add its config here and handle it in create_model().
 MODEL_CONFIGS: dict[str, dict] = {
-    "mobilenetv2": {
+    "vit_small": {
         "input_size": 224,
-        "feature_dim": 1280,
-        "dropout": 0.2,
-        "num_blocks": 18,           # model.features[0..17]
-        "default_unfreeze_from": 14,  # unfreeze layers 14-17 in Phase 2
+        "feature_dim": 384,
+        "dropout": 0.1,
+        "timm_model": "vit_small_patch16_224.augreg_in21k_ft_in1k",
     },
-    "efficientnet_b2": {
-        "input_size": 260,
-        "feature_dim": 1408,
+    "vit_base": {
+        "input_size": 224,
+        "feature_dim": 768,
+        "dropout": 0.1,
+        "timm_model": "vit_base_patch16_224.augreg_in21k_ft_in1k",
+    },
+    "efficientnet_lite4": {
+        "input_size": 300,
+        "feature_dim": 1280,
         "dropout": 0.3,
-        "num_blocks": 8,            # model.features[0..7]
-        "default_unfreeze_from": None,  # trains end-to-end, no Phase 2
+        "timm_model": "tf_efficientnet_lite4.in1k",
     },
 }
 
@@ -120,116 +106,44 @@ def get_model_config(model_name: str) -> dict:
 def create_model(
     num_classes: int,
     pretrained: bool = True,
-    freeze_backbone: bool = True,
-    model_name: str = "efficientnet_b2",
+    freeze_backbone: bool = False,
+    model_name: str = "vit_small",
 ) -> nn.Module:
     """
     Create a model adapted for bird species classification.
 
     Args:
         num_classes: Number of bird species (555 for NABirds)
-        pretrained: Load ImageNet pretrained weights
+        pretrained: Load ImageNet pretrained weights (via timm)
         freeze_backbone: If True, freeze the feature extraction layers
-        model_name: Which architecture — "mobilenetv2" or "efficientnet_b2"
+        model_name: Which architecture — "vit_small", "vit_base", or "efficientnet_lite4"
 
     Returns:
         Modified model with new classifier head
-
-    Steps:
-    1. Load pretrained model (ImageNet weights if pretrained=True)
-    2. Freeze the backbone so only the classifier head trains initially
-    3. Replace the classifier head: Linear(feature_dim, 1000) → Linear(feature_dim, num_classes)
-    4. Return the model
     """
+    import timm
+
     config = get_model_config(model_name)
 
-    # 1. Load model with or without ImageNet pretrained weights
-    if model_name == "mobilenetv2":
-        weights = models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
-        model = models.mobilenet_v2(weights=weights)
-    elif model_name == "efficientnet_b2":
-        weights = models.EfficientNet_B2_Weights.IMAGENET1K_V1 if pretrained else None
-        model = models.efficientnet_b2(weights=weights)
-
-    # 2. Freeze the backbone so only the classifier head trains in Phase 1
-    #    (For EfficientNet-B2, you'd typically pass freeze_backbone=False
-    #     and train end-to-end in a single phase)
-    if freeze_backbone:
-        for param in model.features.parameters():
-            param.requires_grad = False
-
-    # 3. Replace the classifier head: Linear(feature_dim, 1000) → Linear(feature_dim, num_classes)
-    #    Both MobileNetV2 and EfficientNet-B2 use model.classifier[1] as the Linear layer
-    in_features = model.classifier[1].in_features  # 1280 for MobileNetV2, 1408 for EfficientNet-B2
-    model.classifier = nn.Sequential(
-        nn.Dropout(config["dropout"]),
-        nn.Linear(in_features, num_classes),
+    # Load model via timm with pretrained weights and custom head
+    model = timm.create_model(
+        config["timm_model"],
+        pretrained=pretrained,
+        num_classes=num_classes,
+        drop_rate=config["dropout"],
     )
 
-    # Store model name for downstream use (e.g., unfreeze_backbone checks this)
+    # Optionally freeze backbone (everything except the classifier head)
+    if freeze_backbone:
+        for name, param in model.named_parameters():
+            # timm uses "head" for the classifier in both ViT and EfficientNet
+            if "head" not in name and "classifier" not in name:
+                param.requires_grad = False
+
+    # Store model name for downstream use
     model._model_name = model_name
 
     return model
-
-
-def unfreeze_backbone(model: nn.Module, unfreeze_from: int = 14) -> None:
-    """
-    Unfreeze backbone layers for fine-tuning (Phase 2 of training).
-
-    After the classifier head is trained, we unfreeze the backbone and train
-    the entire model with a LOWER learning rate. This lets the backbone adapt
-    its features specifically for birds.
-
-    NOTE: This is used for MobileNetV2's two-phase training strategy.
-    EfficientNet-B2 trains end-to-end in a single phase (no freezing/unfreezing).
-
-    Args:
-        model: The model (MobileNetV2)
-        unfreeze_from: Unfreeze from this layer index onwards.
-            MobileNetV2 has 18 feature blocks (0-17).
-            Unfreezing from 14 means: layers 14-17 + classifier are trainable.
-            Earlier layers (0-13) stay frozen — they detect basic features
-            (edges, textures) that are universal.
-
-    WHY ONLY UNFREEZE LATE LAYERS?
-        Layer 0-6:  Edges, textures       → universal, no need to change
-        Layer 7-13: Shapes, patterns       → mostly universal, leave frozen
-        Layer 14-17: High-level features   → THESE need to shift from "generic object
-                                              parts" to "bird-specific features" like
-                                              beak curvature, feather patterns, eye rings
-        Classifier: Final decision         → already trained in Phase 1
-
-        By only unfreezing 14+, we get bird-specific adaptation without
-        destroying the valuable low-level feature detectors.
-
-    WHY A LOWER LEARNING RATE?
-        The unfrozen backbone layers already have good weights from ImageNet.
-        We want to NUDGE them toward birds, not randomly scramble them.
-        Typical strategy: use 1/10th of the Phase 1 learning rate.
-
-    Steps:
-    1. Freeze everything (clean slate)
-    2. Unfreeze layers from unfreeze_from onwards
-    3. Unfreeze the classifier head
-    """
-    # EfficientNet-B2 trains end-to-end — no phase 2 needed
-    model_name = getattr(model, "_model_name", "mobilenetv2")
-    if model_name == "efficientnet_b2":
-        print("  EfficientNet-B2 trains end-to-end — skipping unfreeze (not needed)")
-        return
-
-    # Step 1: Freeze everything first (clean slate)
-    for param in model.parameters():
-        param.requires_grad = False
-
-    # Step 2: Unfreeze late backbone layers (14-17)
-    for layer in model.features[unfreeze_from:]:
-        for param in layer.parameters():
-            param.requires_grad = True
-
-    # Step 3: Unfreeze the classifier head (always needs to be trainable)
-    for param in model.classifier.parameters():
-        param.requires_grad = True
 
 
 def count_parameters(model: nn.Module) -> dict:
