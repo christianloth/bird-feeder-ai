@@ -52,7 +52,8 @@ day_night:
 
 # --- Pipeline ---
 pipeline:
-  process_every_n: 5  # Process every Nth frame (higher = less CPU)
+  process_every_n: 5             # Process every Nth frame (higher = less CPU)
+  species_cooldown_seconds: 120  # Suppress duplicate DB saves of same species for N seconds
 
 # --- Location (for sunrise/sunset calculation) ---
 location:
