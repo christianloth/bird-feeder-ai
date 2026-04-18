@@ -1,0 +1,48 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bird-feeder-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-prettybirds}
+      - GF_PLUGINS_PREINSTALL=frser-sqlite-datasource,dalvany-image-panel
+      - GF_SERVER_ROOT_URL=${GF_ROOT_URL:-http://localhost/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - grafana_storage:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+      - ../db/birds.db:/var/lib/bird-feeder/birds.db:ro
+      - ../db/birds.db-wal:/var/lib/bird-feeder/birds.db-wal:ro
+      - ../db/birds.db-shm:/var/lib/bird-feeder/birds.db-shm:ro
+
+  caddy:
+    image: caddy:2
+    container_name: bird-feeder-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - CADDY_BASIC_AUTH_USER=${CADDY_BASIC_AUTH_USER:-admin}
+      - CADDY_BASIC_AUTH_HASH=${CADDY_BASIC_AUTH_HASH}
+      - API_UPSTREAM=${API_UPSTREAM:-host.docker.internal:8000}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - grafana
+
+volumes:
+  grafana_storage:
+  caddy_data:
+  caddy_config:

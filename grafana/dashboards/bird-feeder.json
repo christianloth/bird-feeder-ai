@@ -1,0 +1,1112 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "bird-feeder"
+  ],
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Bird Feeder",
+  "uid": "bird-feeder-main",
+  "version": 6,
+  "weekStart": "",
+  "templating": {
+    "list": [
+      {
+        "name": "bucket",
+        "label": "Bucket (sec)",
+        "type": "custom",
+        "query": "300,900,3600,21600,86400",
+        "current": {
+          "text": "3600",
+          "value": "3600"
+        },
+        "options": [
+          {
+            "text": "300",
+            "value": "300",
+            "selected": false
+          },
+          {
+            "text": "900",
+            "value": "900",
+            "selected": false
+          },
+          {
+            "text": "3600",
+            "value": "3600",
+            "selected": true
+          },
+          {
+            "text": "21600",
+            "value": "21600",
+            "selected": false
+          },
+          {
+            "text": "86400",
+            "value": "86400",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "min_confidence",
+        "label": "Min confidence",
+        "type": "custom",
+        "query": "0.0,0.3,0.5,0.7,0.8,0.9",
+        "current": {
+          "text": "0.0",
+          "value": "0.0"
+        },
+        "options": [
+          {
+            "text": "0.0",
+            "value": "0.0",
+            "selected": true
+          },
+          {
+            "text": "0.3",
+            "value": "0.3",
+            "selected": false
+          },
+          {
+            "text": "0.5",
+            "value": "0.5",
+            "selected": false
+          },
+          {
+            "text": "0.7",
+            "value": "0.7",
+            "selected": false
+          },
+          {
+            "text": "0.8",
+            "value": "0.8",
+            "selected": false
+          },
+          {
+            "text": "0.9",
+            "value": "0.9",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "top_n",
+        "label": "Top N",
+        "type": "custom",
+        "query": "5,10,15,20,30",
+        "current": {
+          "text": "10",
+          "value": "10"
+        },
+        "options": [
+          {
+            "text": "5",
+            "value": "5",
+            "selected": false
+          },
+          {
+            "text": "10",
+            "value": "10",
+            "selected": true
+          },
+          {
+            "text": "15",
+            "value": "15",
+            "selected": false
+          },
+          {
+            "text": "20",
+            "value": "20",
+            "selected": false
+          },
+          {
+            "text": "30",
+            "value": "30",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "selected_id",
+        "label": "Selected detection",
+        "type": "textbox",
+        "query": "0",
+        "current": {
+          "text": "0",
+          "value": "0"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "At a glance",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Detections (range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND confidence >= $min_confidence AND is_false_positive = 0",
+          "queryText": "SELECT COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND confidence >= $min_confidence AND is_false_positive = 0",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Detections today",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COUNT(*) AS today FROM detections WHERE date(timestamp) = date('now','localtime') AND is_false_positive = 0",
+          "queryText": "SELECT COUNT(*) AS today FROM detections WHERE date(timestamp) = date('now','localtime') AND is_false_positive = 0",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Unique species (range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COUNT(DISTINCT species_id) AS species FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0",
+          "queryText": "SELECT COUNT(DISTINCT species_id) AS species FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Most common today",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT s.common_name AS species FROM detections d JOIN species s ON s.id = d.species_id WHERE date(d.timestamp) = date('now','localtime') AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY COUNT(*) DESC LIMIT 1",
+          "queryText": "SELECT s.common_name AS species FROM detections d JOIN species s ON s.id = d.species_id WHERE date(d.timestamp) = date('now','localtime') AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY COUNT(*) DESC LIMIT 1",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Avg confidence (range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT AVG(confidence) AS avg_conf FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0",
+          "queryText": "SELECT AVG(confidence) AS avg_conf FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "All-time detections",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COUNT(*) AS total FROM detections WHERE is_false_positive = 0",
+          "queryText": "SELECT COUNT(*) AS total FROM detections WHERE is_false_positive = 0",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Activity over time",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Detections over time (all species)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 1
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "SELECT CAST(strftime('%s', timestamp) AS INTEGER) / $bucket * $bucket AS time, COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND confidence >= $min_confidence AND is_false_positive = 0 GROUP BY time ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', timestamp) AS INTEGER) / $bucket * $bucket AS time, COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND confidence >= $min_confidence AND is_false_positive = 0 GROUP BY time ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Detections by species (top $top_n, stacked)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "WITH top AS (SELECT species_id FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND confidence >= $min_confidence AND is_false_positive = 0 GROUP BY species_id ORDER BY COUNT(*) DESC LIMIT $top_n) SELECT CAST(strftime('%s', d.timestamp) AS INTEGER) / $bucket * $bucket AS time, s.common_name AS series, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.confidence >= $min_confidence AND d.is_false_positive = 0 AND d.species_id IN (SELECT species_id FROM top) GROUP BY time, series ORDER BY time",
+          "queryText": "WITH top AS (SELECT species_id FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND confidence >= $min_confidence AND is_false_positive = 0 GROUP BY species_id ORDER BY COUNT(*) DESC LIMIT $top_n) SELECT CAST(strftime('%s', d.timestamp) AS INTEGER) / $bucket * $bucket AS time, s.common_name AS series, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.confidence >= $min_confidence AND d.is_false_positive = 0 AND d.species_id IN (SELECT species_id FROM top) GROUP BY time, series ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "heatmap",
+      "title": "Activity by hour of day vs day of week",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "color": {
+          "scheme": "Oranges",
+          "mode": "scheme",
+          "steps": 64,
+          "reverse": false
+        },
+        "yAxis": {
+          "axisPlacement": "left"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CAST(strftime('%w', timestamp, 'localtime') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) AS hour, COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0 GROUP BY dow, hour ORDER BY dow, hour",
+          "queryText": "SELECT CAST(strftime('%w', timestamp, 'localtime') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) AS hour, COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0 GROUP BY dow, hour ORDER BY dow, hour",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Species breakdown",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Top species (range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_confidence"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT s.common_name AS species, s.scientific_name AS scientific, COUNT(*) AS detections, AVG(d.confidence) AS avg_confidence, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC",
+          "queryText": "SELECT s.common_name AS species, s.scientific_name AS scientific, COUNT(*) AS detections, AVG(d.confidence) AS avg_confidence, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "piechart",
+      "title": "Species share (range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC LIMIT $top_n",
+          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC LIMIT $top_n",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Most frequent bird per day",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH daily AS (SELECT date(d.timestamp,'localtime') AS day, d.species_id, COUNT(*) AS cnt FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY day, d.species_id), ranked AS (SELECT day, species_id, cnt, RANK() OVER (PARTITION BY day ORDER BY cnt DESC) AS rk FROM daily) SELECT r.day, s.common_name AS winner, r.cnt AS detections FROM ranked r JOIN species s ON s.id = r.species_id WHERE r.rk = 1 ORDER BY r.day DESC",
+          "queryText": "WITH daily AS (SELECT date(d.timestamp,'localtime') AS day, d.species_id, COUNT(*) AS cnt FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY day, d.species_id), ranked AS (SELECT day, species_id, cnt, RANK() OVER (PARTITION BY day ORDER BY cnt DESC) AS rk FROM daily) SELECT r.day, s.common_name AS winner, r.cnt AS detections FROM ranked r JOIN species s ON s.id = r.species_id WHERE r.rk = 1 ORDER BY r.day DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "Rare visitors (<5 in range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections, MIN(d.timestamp) AS first_seen, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id HAVING detections < 5 ORDER BY detections ASC, last_seen DESC",
+          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections, MIN(d.timestamp) AS first_seen, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id HAVING detections < 5 ORDER BY detections ASC, last_seen DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Quality & curation",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "histogram",
+      "title": "Confidence distribution",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "options": {
+        "bucketSize": 0.05,
+        "bucketOffset": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT confidence FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0",
+          "queryText": "SELECT confidence FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "False positive rate over time",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "SELECT CAST(strftime('%s', timestamp) AS INTEGER) / $bucket * $bucket AS time, AVG(CASE WHEN is_false_positive = 1 THEN 1.0 ELSE 0.0 END) AS fp_rate FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND reviewed = 1 GROUP BY time ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', timestamp) AS INTEGER) / $bucket * $bucket AS time, AVG(CASE WHEN is_false_positive = 1 THEN 1.0 ELSE 0.0 END) AS fp_rate FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND reviewed = 1 GROUP BY time ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "% reviewed (range)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 52
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CAST(SUM(CASE WHEN reviewed = 1 THEN 1 ELSE 0 END) AS REAL) / NULLIF(COUNT(*),0) AS reviewed_pct FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to",
+          "queryText": "SELECT CAST(SUM(CASE WHEN reviewed = 1 THEN 1 ELSE 0 END) AS REAL) / NULLIF(COUNT(*),0) AS reviewed_pct FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "table",
+      "title": "Classifier model breakdown",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 18,
+        "x": 6,
+        "y": 52
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COALESCE(classifier_model,'(none)') AS model, COUNT(*) AS detections, AVG(confidence) AS avg_conf FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to GROUP BY classifier_model ORDER BY detections DESC",
+          "queryText": "SELECT COALESCE(classifier_model,'(none)') AS model, COUNT(*) AS detections, AVG(confidence) AS avg_conf FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to GROUP BY classifier_model ORDER BY detections DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "Detection gallery",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 51,
+      "type": "dalvany-image-panel",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 18,
+        "w": 10,
+        "x": 0,
+        "y": 57
+      },
+      "options": {
+        "baseUrl": "/api/detections/",
+        "suffix": "/annotated",
+        "icon_field": "id",
+        "alt_field": "label",
+        "autofit": true,
+        "singleFill": true,
+        "tooltip": true,
+        "tooltip_field": "label",
+        "tooltip_include_field": true,
+        "tooltip_include_date": false,
+        "underline": {
+          "field": "label",
+          "text_size": 14,
+          "text_align": "center"
+        },
+        "open_url": {
+          "enable": false
+        }
+      },
+      "title": "Selected detection (click a row in the table)",
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT d.id AS id, s.common_name || ' \u2014 ' || printf('%.2f', d.confidence) || ' \u2014 ' || d.timestamp AS label FROM detections d JOIN species s ON s.id = d.species_id WHERE ($selected_id = 0 OR d.id = $selected_id) AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 1",
+          "queryText": "SELECT d.id AS id, s.common_name || ' \u2014 ' || printf('%.2f', d.confidence) || ' \u2014 ' || d.timestamp AS label FROM detections d JOIN species s ON s.id = d.species_id WHERE ($selected_id = 0 OR d.id = $selected_id) AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 1",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "type": "table",
+      "title": "Recent detections (crops + full frames)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 18,
+        "w": 14,
+        "x": 10,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "time"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Time"
+              },
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "species"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Species"
+              },
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "confidence"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Confidence"
+              },
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pick"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Select"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text",
+                  "applyToRow": false
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8ab8ff"
+                }
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show this detection in the Selected panel",
+                    "url": "/grafana/d/bird-feeder-main/bird-feeder?var-selected_id=${__data.fields.detection_id}&${__url_time_range}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "crop"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Crop"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "image"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "frame"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Annotated frame"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "image"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detection_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "ID"
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "lg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT '\u25b6 Show' AS pick, d.id AS detection_id, CAST(strftime('%s', d.timestamp) AS INTEGER) * 1000 AS time, s.common_name AS species, d.confidence AS confidence, '/api/detections/' || d.id || '/crop' AS crop, '/api/detections/' || d.id || '/annotated' AS frame FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.confidence >= $min_confidence AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 100",
+          "queryText": "SELECT '\u25b6 Show' AS pick, d.id AS detection_id, CAST(strftime('%s', d.timestamp) AS INTEGER) * 1000 AS time, s.common_name AS species, d.confidence AS confidence, '/api/detections/' || d.id || '/crop' AS crop, '/api/detections/' || d.id || '/annotated' AS frame FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.confidence >= $min_confidence AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 100",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    }
+  ]
+}
