@@ -19,7 +19,7 @@
   "timezone": "browser",
   "title": "Bird Feeder",
   "uid": "bird-feeder-main",
-  "version": 6,
+  "version": 17,
   "weekStart": "",
   "templating": {
     "list": [
@@ -642,15 +642,16 @@
         {
           "refId": "A",
           "queryType": "table",
-          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC LIMIT $top_n",
-          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC LIMIT $top_n",
+          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC",
+          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC",
           "timeColumns": []
         }
-      ]
+      ],
+      "description": "Share of detections per species across the selected range. Rare visitors appear as small slices."
     },
     {
       "id": 23,
-      "type": "table",
+      "type": "bargauge",
       "title": "Most frequent bird per day",
       "datasource": {
         "type": "frser-sqlite-datasource",
@@ -658,49 +659,65 @@
       },
       "gridPos": {
         "h": 10,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 33
       },
       "options": {
-        "showHeader": true
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "legend": {
+          "showLegend": false
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "minVizWidth": 0,
+        "minVizHeight": 16,
+        "sizing": "auto",
+        "namePlacement": "auto",
+        "text": {
+          "valueSize": 18,
+          "titleSize": 14
+        }
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "table",
-          "rawQueryText": "WITH daily AS (SELECT date(d.timestamp,'localtime') AS day, d.species_id, COUNT(*) AS cnt FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY day, d.species_id), ranked AS (SELECT day, species_id, cnt, RANK() OVER (PARTITION BY day ORDER BY cnt DESC) AS rk FROM daily) SELECT r.day, s.common_name AS winner, r.cnt AS detections FROM ranked r JOIN species s ON s.id = r.species_id WHERE r.rk = 1 ORDER BY r.day DESC",
-          "queryText": "WITH daily AS (SELECT date(d.timestamp,'localtime') AS day, d.species_id, COUNT(*) AS cnt FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY day, d.species_id), ranked AS (SELECT day, species_id, cnt, RANK() OVER (PARTITION BY day ORDER BY cnt DESC) AS rk FROM daily) SELECT r.day, s.common_name AS winner, r.cnt AS detections FROM ranked r JOIN species s ON s.id = r.species_id WHERE r.rk = 1 ORDER BY r.day DESC",
+          "rawQueryText": "WITH daily AS (SELECT date(d.timestamp,'localtime') AS day, d.species_id, COUNT(*) AS cnt FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY day, d.species_id), ranked AS (SELECT day, species_id, cnt, RANK() OVER (PARTITION BY day ORDER BY cnt DESC) AS rk FROM daily) SELECT r.day || ' \u2014 ' || s.common_name AS label, r.cnt AS detections FROM ranked r JOIN species s ON s.id = r.species_id WHERE r.rk = 1 ORDER BY r.day DESC",
+          "queryText": "WITH daily AS (SELECT date(d.timestamp,'localtime') AS day, d.species_id, COUNT(*) AS cnt FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY day, d.species_id), ranked AS (SELECT day, species_id, cnt, RANK() OVER (PARTITION BY day ORDER BY cnt DESC) AS rk FROM daily) SELECT r.day || ' \u2014 ' || s.common_name AS label, r.cnt AS detections FROM ranked r JOIN species s ON s.id = r.species_id WHERE r.rk = 1 ORDER BY r.day DESC",
           "timeColumns": []
         }
-      ]
-    },
-    {
-      "id": 24,
-      "type": "table",
-      "title": "Rare visitors (<5 in range)",
-      "datasource": {
-        "type": "frser-sqlite-datasource",
-        "uid": "birds-db"
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 33
-      },
-      "options": {
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "queryType": "table",
-          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections, MIN(d.timestamp) AS first_seen, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id HAVING detections < 5 ORDER BY detections ASC, last_seen DESC",
-          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections, MIN(d.timestamp) AS first_seen, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id HAVING detections < 5 ORDER BY detections ASC, last_seen DESC",
-          "timeColumns": []
-        }
-      ]
+      ],
+      "description": "Winner species each day in the selected range, with a gradient bar scaled to detection count.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 30,
@@ -851,75 +868,479 @@
       ]
     },
     {
-      "id": 50,
+      "id": 60,
       "type": "row",
-      "title": "Detection gallery",
+      "title": "Weather x birds",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 76
       },
       "collapsed": false,
       "panels": []
     },
     {
-      "id": 51,
-      "type": "dalvany-image-panel",
+      "id": 61,
+      "type": "timeseries",
+      "title": "Detections + temperature over time",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "description": "Bars: bird detections per bucket. Line (right axis): temperature in \u00b0C.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 77
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 60
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#73bf69"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "temperature_c"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#ff7b00"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "SELECT CAST(strftime('%s', d.timestamp) AS INTEGER)/$bucket*$bucket AS time, COUNT(*) AS detections FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY time ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', d.timestamp) AS INTEGER)/$bucket*$bucket AS time, COUNT(*) AS detections FROM detections d WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY time ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        },
+        {
+          "refId": "B",
+          "queryType": "time series",
+          "rawQueryText": "SELECT CAST(strftime('%s', w.timestamp) AS INTEGER) AS time, w.temperature_c AS temperature_c FROM weather_observations w WHERE strftime('%s', w.timestamp)*1000 BETWEEN $__from AND $__to ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', w.timestamp) AS INTEGER) AS time, w.temperature_c AS temperature_c FROM weather_observations w WHERE strftime('%s', w.timestamp)*1000 BETWEEN $__from AND $__to ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 62,
+      "type": "barchart",
+      "title": "Detections by temperature",
       "datasource": {
         "type": "frser-sqlite-datasource",
         "uid": "birds-db"
       },
       "gridPos": {
-        "h": 18,
-        "w": 10,
+        "h": 8,
+        "w": 8,
         "x": 0,
-        "y": 57
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "baseUrl": "/api/detections/",
-        "suffix": "/annotated",
-        "icon_field": "id",
-        "alt_field": "label",
-        "autofit": true,
-        "singleFill": true,
-        "tooltip": true,
-        "tooltip_field": "label",
-        "tooltip_include_field": true,
-        "tooltip_include_date": false,
-        "underline": {
-          "field": "label",
-          "text_size": 14,
-          "text_align": "center"
+        "orientation": "auto",
+        "xField": "bucket",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
         },
-        "open_url": {
-          "enable": false
-        }
+        "xTickLabelRotation": 0
       },
-      "title": "Selected detection (click a row in the table)",
       "targets": [
         {
           "refId": "A",
           "queryType": "table",
-          "rawQueryText": "SELECT d.id AS id, s.common_name || ' \u2014 ' || printf('%.2f', d.confidence) || ' \u2014 ' || d.timestamp AS label FROM detections d JOIN species s ON s.id = d.species_id WHERE ($selected_id = 0 OR d.id = $selected_id) AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 1",
-          "queryText": "SELECT d.id AS id, s.common_name || ' \u2014 ' || printf('%.2f', d.confidence) || ' \u2014 ' || d.timestamp AS label FROM detections d JOIN species s ON s.id = d.species_id WHERE ($selected_id = 0 OR d.id = $selected_id) AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 1",
+          "rawQueryText": "SELECT CAST(ROUND(w.temperature_c/2)*2 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.temperature_c IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "queryText": "SELECT CAST(ROUND(w.temperature_c/2)*2 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.temperature_c IS NOT NULL GROUP BY bucket ORDER BY bucket",
           "timeColumns": []
         }
       ]
     },
     {
-      "id": 52,
-      "type": "table",
-      "title": "Recent detections (crops + full frames)",
+      "id": 63,
+      "type": "barchart",
+      "title": "Detections by precipitation (mm)",
       "datasource": {
         "type": "frser-sqlite-datasource",
         "uid": "birds-db"
       },
       "gridPos": {
-        "h": 18,
-        "w": 14,
-        "x": 10,
-        "y": 57
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "lengthmm"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "auto",
+        "xField": "bucket",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
+        },
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CAST(ROUND(w.precipitation_mm/0.5)*0.5 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.precipitation_mm IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "queryText": "SELECT CAST(ROUND(w.precipitation_mm/0.5)*0.5 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.precipitation_mm IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 64,
+      "type": "barchart",
+      "title": "Detections by cloud cover (%)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "auto",
+        "xField": "bucket",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
+        },
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CAST(ROUND(w.cloud_cover_pct/10)*10 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.cloud_cover_pct IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "queryText": "SELECT CAST(ROUND(w.cloud_cover_pct/10)*10 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.cloud_cover_pct IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 65,
+      "type": "barchart",
+      "title": "Detections by wind speed (km/h)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 93
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "velocitykmh"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "auto",
+        "xField": "bucket",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
+        },
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CAST(ROUND(w.wind_speed_kmh/2)*2 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.wind_speed_kmh IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "queryText": "SELECT CAST(ROUND(w.wind_speed_kmh/2)*2 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.wind_speed_kmh IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 66,
+      "type": "barchart",
+      "title": "Detections by humidity (%)",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 93
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "auto",
+        "xField": "bucket",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
+        },
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CAST(ROUND(w.humidity_pct/5)*5 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.humidity_pct IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "queryText": "SELECT CAST(ROUND(w.humidity_pct/5)*5 AS INTEGER) AS bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.humidity_pct IS NOT NULL GROUP BY bucket ORDER BY bucket",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 67,
+      "type": "table",
+      "title": "Per-species weather preferences",
+      "description": "Average conditions observed during each species' detections (species with \u22653 detections).",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -934,156 +1355,73 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "time"
+              "options": "avg_temp_c"
             },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "Time"
-              },
-              {
-                "id": "custom.width",
-                "value": 180
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "species"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Species"
-              },
-              {
-                "id": "custom.width",
-                "value": 200
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "confidence"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Confidence"
-              },
               {
                 "id": "unit",
-                "value": "percentunit"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              },
-              {
-                "id": "custom.width",
-                "value": 110
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "pick"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Select"
-              },
-              {
-                "id": "custom.width",
-                "value": 80
+                "value": "celsius"
               },
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-text",
-                  "applyToRow": false
+                  "type": "color-background",
+                  "mode": "gradient"
                 }
               },
               {
                 "id": "color",
                 "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#8ab8ff"
+                  "mode": "continuous-GrYlRd"
                 }
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Show this detection in the Selected panel",
-                    "url": "/grafana/d/bird-feeder-main/bird-feeder?var-selected_id=${__data.fields.detection_id}&${__url_time_range}",
-                    "targetBlank": false
-                  }
-                ]
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "crop"
+              "options": "avg_humidity_pct"
             },
             "properties": [
               {
-                "id": "displayName",
-                "value": "Crop"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "image"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 160
+                "id": "unit",
+                "value": "percent"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "frame"
+              "options": "avg_wind_kmh"
             },
             "properties": [
               {
-                "id": "displayName",
-                "value": "Annotated frame"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "image"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 260
+                "id": "unit",
+                "value": "velocitykmh"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "detection_id"
+              "options": "avg_cloud_pct"
             },
             "properties": [
               {
-                "id": "displayName",
-                "value": "ID"
-              },
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_precip_mm"
+            },
+            "properties": [
               {
-                "id": "custom.width",
-                "value": 70
+                "id": "unit",
+                "value": "lengthmm"
               }
             ]
           }
@@ -1091,20 +1429,160 @@
       },
       "options": {
         "showHeader": true,
-        "footer": {
-          "show": false
-        },
-        "cellHeight": "lg"
+        "sortBy": [
+          {
+            "displayName": "detections",
+            "desc": true
+          }
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "table",
-          "rawQueryText": "SELECT '\u25b6 Show' AS pick, d.id AS detection_id, CAST(strftime('%s', d.timestamp) AS INTEGER) * 1000 AS time, s.common_name AS species, d.confidence AS confidence, '/api/detections/' || d.id || '/crop' AS crop, '/api/detections/' || d.id || '/annotated' AS frame FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.confidence >= $min_confidence AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 100",
-          "queryText": "SELECT '\u25b6 Show' AS pick, d.id AS detection_id, CAST(strftime('%s', d.timestamp) AS INTEGER) * 1000 AS time, s.common_name AS species, d.confidence AS confidence, '/api/detections/' || d.id || '/crop' AS crop, '/api/detections/' || d.id || '/annotated' AS frame FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.confidence >= $min_confidence AND d.is_false_positive = 0 ORDER BY d.timestamp DESC LIMIT 100",
-          "timeColumns": [
-            "time"
-          ]
+          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections, ROUND(AVG(w.temperature_c),1) AS avg_temp_c, ROUND(AVG(w.humidity_pct),0) AS avg_humidity_pct, ROUND(AVG(w.wind_speed_kmh),1) AS avg_wind_kmh, ROUND(AVG(w.cloud_cover_pct),0) AS avg_cloud_pct, ROUND(AVG(w.precipitation_mm),2) AS avg_precip_mm FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id HAVING detections >= 3 ORDER BY detections DESC",
+          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections, ROUND(AVG(w.temperature_c),1) AS avg_temp_c, ROUND(AVG(w.humidity_pct),0) AS avg_humidity_pct, ROUND(AVG(w.wind_speed_kmh),1) AS avg_wind_kmh, ROUND(AVG(w.cloud_cover_pct),0) AS avg_cloud_pct, ROUND(AVG(w.precipitation_mm),2) AS avg_precip_mm FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id HAVING detections >= 3 ORDER BY detections DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 68,
+      "type": "table",
+      "title": "Top $top_n species x temperature (detection count)",
+      "description": "How often each popular species was detected at each 2\u00b0C band. Useful for seeing temperature preference per species.",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 111
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "gradient"
+            }
+          },
+          "color": {
+            "mode": "continuous-BlPu"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "species"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "temp_bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT s.common_name AS species, CAST(ROUND(w.temperature_c/2)*2 AS INTEGER) AS temp_bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.temperature_c IS NOT NULL AND d.species_id IN (SELECT species_id FROM detections WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive=0 GROUP BY species_id ORDER BY COUNT(*) DESC LIMIT $top_n) GROUP BY species, temp_bucket ORDER BY detections DESC",
+          "queryText": "SELECT s.common_name AS species, CAST(ROUND(w.temperature_c/2)*2 AS INTEGER) AS temp_bucket, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.temperature_c IS NOT NULL AND d.species_id IN (SELECT species_id FROM detections WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive=0 GROUP BY species_id ORDER BY COUNT(*) DESC LIMIT $top_n) GROUP BY species, temp_bucket ORDER BY detections DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 69,
+      "type": "barchart",
+      "title": "Detections by weather condition",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 111
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detections"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#b877d9"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "condition",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CASE w.weather_code WHEN 0 THEN 'Clear' WHEN 1 THEN 'Mostly clear' WHEN 2 THEN 'Partly cloudy' WHEN 3 THEN 'Overcast' WHEN 45 THEN 'Fog' WHEN 48 THEN 'Rime fog' WHEN 51 THEN 'Light drizzle' WHEN 53 THEN 'Drizzle' WHEN 55 THEN 'Dense drizzle' WHEN 61 THEN 'Light rain' WHEN 63 THEN 'Rain' WHEN 65 THEN 'Heavy rain' WHEN 71 THEN 'Light snow' WHEN 73 THEN 'Snow' WHEN 75 THEN 'Heavy snow' WHEN 80 THEN 'Rain showers' WHEN 81 THEN 'Heavy showers' WHEN 82 THEN 'Violent showers' WHEN 95 THEN 'Thunderstorm' WHEN 96 THEN 'T-storm w/ hail' WHEN 99 THEN 'Severe t-storm' ELSE 'Code ' || w.weather_code END AS condition, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.weather_code IS NOT NULL GROUP BY condition ORDER BY detections DESC",
+          "queryText": "SELECT CASE w.weather_code WHEN 0 THEN 'Clear' WHEN 1 THEN 'Mostly clear' WHEN 2 THEN 'Partly cloudy' WHEN 3 THEN 'Overcast' WHEN 45 THEN 'Fog' WHEN 48 THEN 'Rime fog' WHEN 51 THEN 'Light drizzle' WHEN 53 THEN 'Drizzle' WHEN 55 THEN 'Dense drizzle' WHEN 61 THEN 'Light rain' WHEN 63 THEN 'Rain' WHEN 65 THEN 'Heavy rain' WHEN 71 THEN 'Light snow' WHEN 73 THEN 'Snow' WHEN 75 THEN 'Heavy snow' WHEN 80 THEN 'Rain showers' WHEN 81 THEN 'Heavy showers' WHEN 82 THEN 'Violent showers' WHEN 95 THEN 'Thunderstorm' WHEN 96 THEN 'T-storm w/ hail' WHEN 99 THEN 'Severe t-storm' ELSE 'Code ' || w.weather_code END AS condition, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.weather_code IS NOT NULL GROUP BY condition ORDER BY detections DESC",
+          "timeColumns": []
         }
       ]
     }

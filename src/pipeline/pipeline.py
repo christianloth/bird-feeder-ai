@@ -67,7 +67,7 @@ class BirdPipeline:
         self.wildlife_detector = wildlife_detector
         self.mode_manager = mode_manager
         self.camera = camera
-        self.tracker = tracker or BirdTracker()
+        self.tracker = tracker or BirdTracker(min_frames_for_detection=settings.min_frames_for_detection)
         self.storage = storage or ImageStorage()
         self.skipper = FrameSkipper(process_every_n=process_every_n)
         self.save_enabled = save_enabled
@@ -607,10 +607,10 @@ class BirdPipeline:
             logger.info(f"  Output video: {output}")
 
         if virtual_rtsp:
-            # Use RTSP defaults: require 3 frames before accepting a track
+            # Use RTSP defaults: require N frames before accepting a track
             if self.save_enabled:
                 self._init_database()
-            self.tracker = BirdTracker(min_frames_for_detection=3)
+            self.tracker = BirdTracker(min_frames_for_detection=settings.min_frames_for_detection)
         else:
             self.tracker = BirdTracker(min_frames_for_detection=1)
 

@@ -54,6 +54,7 @@ day_night:
 pipeline:
   process_every_n: 5             # Process every Nth frame (higher = less CPU)
   species_cooldown_seconds: 120  # Suppress duplicate DB saves of same species for N seconds
+  min_frames_for_detection: 3   # Consecutive frames a bird must appear before being sent downstream (1 = immediate)
 
 # --- Location (for sunrise/sunset calculation) ---
 location:
