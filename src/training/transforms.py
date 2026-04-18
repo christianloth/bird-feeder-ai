@@ -14,9 +14,9 @@ WHAT TO LEARN:
 - All pipelines must end with ToTensor() and Normalize()
 
 MODEL INPUT SIZES:
-- MobileNetV2: 224x224 pixels
-- EfficientNet-B2: 260x260 pixels
-- The input_size parameter controls this — defaults to 224 (MobileNetV2)
+- ViT-Small: 224x224 pixels
+- EfficientNet-Lite4: 300x300 pixels
+- The input_size parameter controls this — defaults to 224 (ViT-Small)
 
 NORMALIZATION (same for both models — both pretrained on ImageNet):
 - Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
@@ -50,10 +50,14 @@ DOCS: https://pytorch.org/vision/stable/transforms.html
 from torchvision import transforms
 
 
-# ImageNet normalization values (used because both models were pretrained on ImageNet)
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
-DEFAULT_INPUT_SIZE = 224  # MobileNetV2=224, EfficientNet-B2=260
+# Normalization values for both ViT-Small and EfficientNet-Lite4.
+# Both timm models (vit_small_patch16_224.augreg_in21k_ft_in1k and
+# tf_efficientnet_lite4.in1k) were pretrained with mean=0.5, std=0.5,
+# which maps pixel values from [0,1] to [-1,1].
+# This also matches the Hailo Model Zoo .alls scripts: [127.5]/[127.5] on 0-255 scale.
+IMAGENET_MEAN = [0.5, 0.5, 0.5]
+IMAGENET_STD = [0.5, 0.5, 0.5]
+DEFAULT_INPUT_SIZE = 224  # ViT-Small=224, EfficientNet-Lite4=300
 
 
 def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compose:
@@ -61,7 +65,7 @@ def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Com
     Training transforms with data augmentation.
 
     Args:
-        input_size: Model input resolution (224 for MobileNetV2, 260 for EfficientNet-B2)
+        input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
 
     Pipeline:
     1. RandomResizedCrop(input_size) — crop random region and resize to input_size x input_size
@@ -70,6 +74,15 @@ def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Com
     4. ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)
     5. transforms.ToTensor()
     6. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+    7. RandomErasing(p=0.25, scale=(0.02, 0.2)) — simulates occlusion
+
+    WHY RandomErasing? Production birds at the feeder are constantly partially
+    occluded by feeder bars, perches, leaves, and other birds. NABirds training
+    images are clean field-guide-style shots. Without occlusion augmentation,
+    the model develops brittle features that fail when parts of the bird are
+    hidden. p=0.25 means 75% of images stay untouched; scale=(0.02, 0.2)
+    erases 2-20% of the image (smaller than torchvision default to avoid
+    hiding too much of the bird).
     """
     return transforms.Compose([
         transforms.RandomResizedCrop(input_size),
@@ -78,6 +91,7 @@ def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Com
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.2)),
     ])
 
 
@@ -86,21 +100,28 @@ def get_val_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compo
     Validation/test transforms — NO randomness.
 
     Args:
-        input_size: Model input resolution (224 for MobileNetV2, 260 for EfficientNet-B2)
+        input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
 
     Pipeline:
-    1. Resize(input_size + 32) — resize shortest edge (standard ImageNet eval protocol)
-    2. CenterCrop(input_size) — deterministic center crop
-    3. transforms.ToTensor()
-    4. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+    1. Resize((input_size, input_size)) — direct resize to square, no center crop
+    2. transforms.ToTensor()
+    3. transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
 
-    WHY different from training?
-    - No randomness ensures evaluation is reproducible
-    - Resize then CenterCrop is the standard ImageNet eval protocol
+    WHY direct resize instead of Resize+CenterCrop?
+    - The standard ImageNet eval (Resize(256) → CenterCrop(224)) was designed
+      for arbitrary photos where the subject is loosely centered. It throws
+      away ~23% of pixels around the edges.
+    - In production, our input is a TIGHT YOLO bounding-box crop where the
+      bird already fills the frame. Center-cropping would discard wing tips,
+      tail feathers, and head crests — exactly the discriminative features
+      a fine-grained bird classifier needs.
+    - Direct resize keeps the entire bird visible. Aspect ratio distortion
+      is acceptable because training augmentation (RandomResizedCrop) already
+      produces aspect-ratio-distorted square outputs.
+    - Validation must match production preprocessing for accurate metrics.
     """
     return transforms.Compose([
-        transforms.Resize(input_size + 32),
-        transforms.CenterCrop(input_size),
+        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ])
@@ -112,6 +133,6 @@ def get_inference_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms
     Used when classifying birds from camera crops.
 
     Args:
-        input_size: Model input resolution (224 for MobileNetV2, 260 for EfficientNet-B2)
+        input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
     """
     return get_val_transforms(input_size)

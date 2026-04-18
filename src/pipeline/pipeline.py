@@ -4,7 +4,7 @@ Main detection pipeline.
 Ties everything together: camera → detector → tracker → classifier → storage → database.
 
 Supports multiple deployment modes:
-- Development (Mac/PC): Ultralytics YOLO + PyTorch MobileNetV2 on MPS/CUDA/CPU
+- Development (Mac/PC): Ultralytics YOLO + PyTorch ViT-Small on MPS/CUDA/CPU
 - Production (Raspberry Pi): Hailo NPU for both detection and classification
 - Demo mode: Process a single image or video file instead of live camera
 """
@@ -72,6 +72,12 @@ class BirdPipeline:
         self.skipper = FrameSkipper(process_every_n=process_every_n)
         self.save_enabled = save_enabled
         self._source = "rtsp"  # Updated by run_on_image/run_on_video
+        self._running = False
+        self._total_detections = 0
+        self._session_factory = None
+        # Species cooldown: suppress duplicate DB saves of the same species
+        # within N seconds. One bird visit = one database record.
+        self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
 
     def _log_pipeline_config(self) -> None:
         """Log pipeline configuration at startup."""
@@ -79,7 +85,12 @@ class BirdPipeline:
         device = get_device()
         logger.info("Pipeline configuration:")
         logger.info(f"  Device: {device}")
-        logger.info(f"  Detector: {settings.detection_model}")
+        active_detector_path = (
+            settings.detection_model_path
+            if self.detector.backend == "hailo"
+            else settings.detection_model
+        )
+        logger.info(f"  Detector: {active_detector_path} ({self.detector.backend})")
         logger.info(f"  Classifier: {self.classifier.backend} ({self.classifier.device})")
         if self.wildlife_detector:
             logger.info(f"  Wildlife: {settings.wildlife_model}")
@@ -94,13 +105,6 @@ class BirdPipeline:
         else:
             logger.info("  Storage: DISABLED (--no-save)")
 
-        self._running = False
-        self._total_detections = 0
-        self._session_factory = None
-        # Species cooldown: suppress duplicate DB saves of the same species
-        # within N seconds. One bird visit = one database record.
-        self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
-
     def _init_database(self):
         """Initialize database tables and species lookup."""
         logger.debug("Initializing database connection")
@@ -109,13 +113,13 @@ class BirdPipeline:
         self._session_factory = get_session_factory(engine)
 
         # Load species from NABirds if not already in DB
-        classes_file = settings.data_dir / "nabirds" / "classes.txt"
-        if classes_file.exists():
+        nabirds_dir = settings.data_dir / "nabirds"
+        if nabirds_dir.exists():
             with self._session_factory() as session:
-                load_species_from_dataset(session, classes_file)
+                load_species_from_dataset(session, nabirds_dir)
             logger.debug("Species lookup table loaded")
         else:
-            logger.warning(f"NABirds classes file not found at {classes_file}")
+            logger.warning(f"NABirds data not found at {nabirds_dir}")
 
         # Load wildlife species for night-mode detection
         with self._session_factory() as session:
@@ -130,7 +134,7 @@ class BirdPipeline:
         confidence: float,
         timestamp: datetime,
         detection_model: str = "yolov8n",
-        classifier_model: str = "mobilenetv2_nabirds",
+        classifier_model: str = "vit_small_nabirds",
         source: str = "rtsp",
     ):
         """Save a detection to storage and database, with species cooldown."""
@@ -252,7 +256,11 @@ class BirdPipeline:
         t0 = time.perf_counter()
         bboxes, confidences = self.detector.detect(frame)
         det_ms = (time.perf_counter() - t0) * 1000
-        logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms")
+        if bboxes:
+            confs_str = ", ".join(f"{c:.2f}" for c in confidences)
+            logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms (YOLO conf: [{confs_str}])")
+        else:
+            logger.debug(f"Detection: 0 birds in {det_ms:.1f}ms")
 
         # 2. Update tracker — returns all active tracks not yet confidently
         #    classified (both new tracks and existing ones being retried)
@@ -290,7 +298,7 @@ class BirdPipeline:
 
             logger.debug(
                 f"Classification: {species_name} ({conf:.2f}) in {cls_ms:.1f}ms "
-                f"[attempt {track.classify_count}, avg of {track.classify_count}]"
+                f"[attempt {track.classify_count}, track seen {track.frame_count}x]"
             )
 
             # Check if we've crossed the confidence threshold
@@ -303,10 +311,15 @@ class BirdPipeline:
 
                 dt = datetime.fromtimestamp(timestamp)
                 if self.save_enabled and self._session_factory and settings.save_crops:
+                    detection_model_name = (
+                        settings.detection_model_path.stem
+                        if self.detector.backend == "hailo"
+                        else Path(settings.detection_model).stem
+                    )
                     self._save_detection(
                         frame, track.bbox, species_name, conf, dt,
-                        detection_model=Path(settings.detection_model).stem,
-                        classifier_model="efficientnet_b2_nabirds",
+                        detection_model=detection_model_name,
+                        classifier_model=settings.classifier_model_path.stem,
                         source=self._source,
                     )
 
@@ -608,11 +621,21 @@ class BirdPipeline:
         t_start = time.time()
 
         while cap.isOpened():
-            ret, frame = cap.read()
+            should_process = frame_num % skip == 0
+
+            # Use grab()/retrieve() to avoid decoding skipped frames.
+            # grab() advances the codec without producing a BGR image;
+            # retrieve() does the full decode only when we need the pixels.
+            if video_writer or should_process:
+                ret, frame = cap.read()
+            else:
+                ret = cap.grab()
+                frame = None
+
             if not ret:
                 break
 
-            if frame_num % skip == 0:
+            if should_process:
                 timestamp = frame_num / fps
 
                 try:
@@ -727,7 +750,7 @@ def _create_night_mode_components(
 
 
 def create_pipeline_dev(
-    checkpoint_path: str | Path = "models/bird-classifier/efficientnet_b2/best_model.pth",
+    checkpoint_path: str | Path = "models/bird-classifier/vit_small/best_model.pth",
     class_names: dict[int, str] | None = None,
     rtsp_url: str | None = None,
     device: str | None = None,
@@ -858,7 +881,7 @@ if __name__ == "__main__":
         help="Process every Nth frame in video mode (default: from config)",
     )
     parser.add_argument(
-        "--checkpoint", type=str, default="models/bird-classifier/efficientnet_b2/best_model.pth",
+        "--checkpoint", type=str, default="models/bird-classifier/vit_small/best_model.pth",
         help="Path to trained model checkpoint (dev mode)",
     )
     parser.add_argument(
@@ -941,6 +964,10 @@ if __name__ == "__main__":
         save_enabled = False
     else:
         save_enabled = not args.no_save
+
+    # --day implies --no-night (no point loading wildlife model if forcing daytime)
+    if args.day:
+        args.no_night = True
 
     if args.mode == "dev":
         pipeline = create_pipeline_dev(

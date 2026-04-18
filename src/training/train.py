@@ -341,9 +341,9 @@ def train(
     Full training pipeline.
 
     Args:
-        scheduler_type: "step_lr" (reduce every 7 epochs — good for MobileNetV2 phases)
-                        or "reduce_on_plateau" (reduce when val acc stalls — good for
-                        end-to-end training like EfficientNet-B2)
+        scheduler_type: "step_lr" (reduce every 7 epochs)
+                        or "reduce_on_plateau" (reduce when val acc stalls — recommended
+                        for both ViT-Small and EfficientNet-Lite4)
         patience: Early stopping patience. If val accuracy doesn't improve for this many
                   epochs, stop training. None = no early stopping.
 
@@ -362,8 +362,19 @@ def train(
     # 2. Move model to device
     model = model.to(device)
 
-    # 3. Loss function — standard CrossEntropyLoss for classification
-    criterion = nn.CrossEntropyLoss()
+    # 3. Loss function — CrossEntropyLoss with label smoothing.
+    #
+    # WHY label_smoothing=0.1?
+    # - Standard recommendation for ViT fine-tuning (Steiner et al. 2021,
+    #   timm defaults, HuggingFace ViT examples).
+    # - With 555 fine-grained bird species, many are visually near-identical
+    #   (House Finch vs Purple Finch vs Cassin's Finch). Hard one-hot targets
+    #   over-penalize "almost right" predictions and force overconfidence.
+    # - Label smoothing replaces [0,0,1,0,...] with [eps,eps,1-eps,eps,...]
+    #   so the model learns calibrated probabilities instead of being forced
+    #   to be 100% confident. Typically gains +0.5-1% top-1 accuracy on
+    #   fine-grained tasks at zero compute cost.
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # 4. Optimizer — only optimize unfrozen parameters (filter by requires_grad)
     optimizer = optim.Adam(
@@ -513,34 +524,17 @@ if __name__ == "__main__":
     #     python scripts/preprocess_dataset.py
     #     python -m src.training.train --batch-size 176 --preprocessed data/nabirds/preprocessed
     #
-    # THE TWO-PHASE TRAINING STRATEGY:
+    # TRAINING STRATEGY (both models use single-phase end-to-end):
     #
-    # Phase 1 — "Teach the new head" (freeze_backbone=True)
-    #   The backbone already knows how to SEE (edges, textures, shapes, feathers).
-    #   We freeze it and only train the classifier head so it learns to MAP those
-    #   visual features to our 555 bird species. This is fast because only the
-    #   final Linear layer has trainable weights.
+    # Both ViT-Small and EfficientNet-Lite4 train end-to-end in a single phase.
+    # The pretrained backbone adapts its features specifically for bird species
+    # while the new classifier head learns to map features to 555 species.
     #
-    #   What's happening inside:
-    #     Image → [FROZEN backbone extracts features] → [NEW head learns species] → prediction
-    #     Early layers see edges → middle layers see shapes → late layers see "parts"
-    #     Only the head weights update. Backbone stays exactly as ImageNet trained it.
+    # ViT-Small uses a lower learning rate (1e-4) because transformer
+    # self-attention layers are sensitive to large gradient updates.
+    # EfficientNet-Lite4 uses standard LR (1e-3) since CNNs are more robust.
     #
-    # Phase 2 — "Specialize the vision" (unfreeze layers 14+, lower LR)
-    #   Now that the head is decent, we unfreeze the LATE backbone layers (14-17)
-    #   and train with a LOWER learning rate (typically 1/10th of Phase 1).
-    #   This lets those layers shift from detecting "generic object parts" to
-    #   detecting "bird-specific features" like beak shapes and wing bars.
-    #
-    #   What's happening inside:
-    #     Image → [FROZEN early layers: edges/textures] →
-    #             [UNFROZEN late layers: adapting to bird parts] →
-    #             [Trained head: bird species] → prediction
-    #
-    #   The lower LR is critical: these layers already have GOOD weights from
-    #   ImageNet. We want to gently nudge them toward birds, not scramble them.
-    #
-    # After both phases, the model has undergone "catastrophic forgetting" —
+    # After training, the model undergoes "catastrophic forgetting" —
     # it can no longer classify "school bus" or "pizza", but it CAN distinguish
     # a House Finch from a Purple Finch. That's exactly what we want.
     #
@@ -549,15 +543,15 @@ if __name__ == "__main__":
     from src.training.dataset import NABirdsDataset, PreprocessedNABirdsDataset
     from src.training.transforms import get_train_transforms, get_val_transforms
     from src.training.model import (
-        create_model, unfreeze_backbone, count_parameters, get_model_config,
+        create_model, count_parameters, get_model_config,
     )
     from src.training.evaluate import plot_training_history
 
     parser = argparse.ArgumentParser(description="Train bird species classifier")
     parser.add_argument(
-        "--model", type=str, default="efficientnet_b2",
-        choices=["mobilenetv2", "efficientnet_b2"],
-        help="model architecture (default: efficientnet_b2)",
+        "--model", type=str, default="vit_small",
+        choices=["vit_small", "vit_base", "efficientnet_lite4"],
+        help="model architecture (default: vit_small)",
     )
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
     parser.add_argument("--num-workers", type=int, default=4, help="data loading workers (default: 4)")
@@ -572,9 +566,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Preprocessed data is baked at 224x224 — only works with MobileNetV2
-    if args.preprocessed and args.model != "mobilenetv2":
-        parser.error("--preprocessed only works with mobilenetv2 (images were preprocessed at 224x224)")
+    # Preprocessed data is baked at 224x224 — works with any 224-input model (ViT-Small/ViT-Base)
+    if args.preprocessed and args.model not in ("vit_small", "vit_base"):
+        parser.error("--preprocessed requires a 224x224 model (vit_small or vit_base)")
 
     # Look up model-specific config (input size, etc.)
     model_config = get_model_config(args.model)
@@ -648,74 +642,73 @@ if __name__ == "__main__":
     # Install SIGTERM handler so IDE/terminal exits don't crash training
     install_sigterm_handler()
 
-    # --- Training strategy depends on model architecture ---
+    # --- Training strategy ---
     #
-    # MobileNetV2: Two-phase (small model, needs careful training)
-    #   Phase 1: Freeze backbone, train only classifier head
-    #   Phase 2: Unfreeze late layers (14+), fine-tune with lower LR
+    # All architectures use single-phase end-to-end training.
     #
-    # EfficientNet-B2: Single-phase (larger model, robust to end-to-end training)
-    #   Train everything at once — no freezing needed
+    # ViT-Small / ViT-Base: Lower learning rate (1e-4) with ReduceLROnPlateau.
+    #   ViTs are sensitive to high initial LR — warmup prevents early divergence.
+    #   ReduceLROnPlateau adapts when val accuracy stalls.
+    #
+    # EfficientNet-Lite4: Standard LR (1e-3) with ReduceLROnPlateau.
+    #   CNNs are more robust to higher LR. Same single-phase strategy.
     #
 
     # Resolve --resume checkpoint path
     resume_path = (SAVE_DIR / "checkpoint.pth") if args.resume else None
 
-    if args.model == "mobilenetv2":
-        # --- Phase 1: Train classifier head only (backbone frozen) ---
-        # Skip Phase 1 if resuming (checkpoint is from Phase 2)
-        if resume_path:
-            print("\n=== Resuming Phase 2 from checkpoint ===")
-            model = create_model(
-                num_classes=train_dataset.num_classes, pretrained=False,
-                freeze_backbone=False, model_name="mobilenetv2",
-            )
-            unfreeze_backbone(model, unfreeze_from=14)
-            history_phase1 = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
-        else:
-            print("\n=== Phase 1: Training classifier head (backbone frozen) ===")
-            model = create_model(
-                num_classes=train_dataset.num_classes, pretrained=True,
-                freeze_backbone=True, model_name="mobilenetv2",
-            )
-            params = count_parameters(model)
-            print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
-
-            history_phase1 = train(
-                model, train_loader, val_loader,
-                num_epochs=10, learning_rate=0.001, save_dir=SAVE_DIR,
-                class_names=class_names, use_amp=args.amp,
-            )
-
-            # --- Phase 2: Fine-tune with late backbone layers unfrozen ---
-            print("\n=== Phase 2: Fine-tuning (layers 14+ unfrozen, lower LR) ===")
-            unfreeze_backbone(model, unfreeze_from=14)
-
+    if args.model == "vit_small":
+        # --- ViT-Small: end-to-end with lower LR + warmup ---
+        # ViTs need lower LR than CNNs (1e-4 vs 1e-3) because self-attention
+        # layers are more sensitive to large gradient updates. The ImageNet-21K
+        # pretrained weights (via timm augreg) provide a strong starting point.
+        print("\n=== Training ViT-Small end-to-end ===")
+        model = create_model(
+            num_classes=train_dataset.num_classes, pretrained=True,
+            freeze_backbone=False, model_name="vit_small",
+        )
         params = count_parameters(model)
         print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
 
-        history_phase2 = train(
+        combined_history = train(
             model, train_loader, val_loader,
-            num_epochs=25, learning_rate=0.0001, save_dir=SAVE_DIR,
+            num_epochs=30, learning_rate=0.0001, save_dir=SAVE_DIR,
             class_names=class_names, use_amp=args.amp,
             resume_from=resume_path,
+            scheduler_type="reduce_on_plateau",
+            patience=5,
         )
 
-        # Combine both phases into one history for plotting
-        combined_history = {
-            key: history_phase1[key] + history_phase2[key]
-            for key in history_phase1
-        }
-
-    elif args.model == "efficientnet_b2":
-        # --- Single phase: train end-to-end (no freezing) ---
-        # EfficientNet-B2 is large enough to handle gradients from an untrained head.
-        # This mirrors the approach used by Dennis Joostel's Birds-Classifier-EfficientNetB2
-        # which achieved 99% accuracy on 525 species with this strategy.
-        print("\n=== Training EfficientNet-B2 end-to-end ===")
+    elif args.model == "vit_base":
+        # --- ViT-Base: end-to-end with lower LR ---
+        # Same training recipe as ViT-Small — just a wider/deeper transformer
+        # (dim=768, 12 heads, 86.5M params). ImageNet-21K pretrained weights
+        # via timm augreg provide the starting point.
+        print("\n=== Training ViT-Base end-to-end ===")
         model = create_model(
             num_classes=train_dataset.num_classes, pretrained=True,
-            freeze_backbone=False, model_name="efficientnet_b2",
+            freeze_backbone=False, model_name="vit_base",
+        )
+        params = count_parameters(model)
+        print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
+
+        combined_history = train(
+            model, train_loader, val_loader,
+            num_epochs=30, learning_rate=0.0001, save_dir=SAVE_DIR,
+            class_names=class_names, use_amp=args.amp,
+            resume_from=resume_path,
+            scheduler_type="reduce_on_plateau",
+            patience=5,
+        )
+
+    elif args.model == "efficientnet_lite4":
+        # --- EfficientNet-Lite4: end-to-end with standard LR ---
+        # Hardware-friendly CNN (no SE blocks, ReLU6 instead of swish).
+        # Runs in a single pass on Hailo-10H NPU.
+        print("\n=== Training EfficientNet-Lite4 end-to-end ===")
+        model = create_model(
+            num_classes=train_dataset.num_classes, pretrained=True,
+            freeze_backbone=False, model_name="efficientnet_lite4",
         )
         params = count_parameters(model)
         print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
@@ -732,3 +725,20 @@ if __name__ == "__main__":
     # --- Plot training history ---
     plot_training_history(combined_history, save_path=SAVE_DIR / "training_history.png")
     print("\nTraining complete!")
+
+    # --- Explicit cleanup to avoid hanging on exit ---
+    # Persistent DataLoader workers can keep the process alive after training
+    # ends. Explicitly delete them so their __del__ terminates worker procs.
+    del train_loader, val_loader, train_dataset, val_dataset
+
+    # Close any lingering matplotlib figures / backends
+    try:
+        import matplotlib.pyplot as _plt
+        _plt.close("all")
+    except ImportError:
+        pass
+
+    # Force exit — bypasses any lingering threads (e.g., tqdm's monitor thread,
+    # DataLoader worker cleanup edge cases) that would otherwise block termination.
+    import sys
+    sys.exit(0)
