@@ -652,7 +652,7 @@ def get_annotated_frame(detection_id: int, session: SessionDep):
         x2, y2 = int(detection.bbox_x2), int(detection.bbox_y2)
 
         # Draw bounding box
-        bbox_color = "#3fb950"
+        bbox_color = "#ff0033"
         for offset in range(3):
             draw.rectangle(
                 [x1 - offset, y1 - offset, x2 + offset, y2 + offset],
