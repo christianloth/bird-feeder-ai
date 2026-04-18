@@ -85,7 +85,12 @@ class BirdPipeline:
         device = get_device()
         logger.info("Pipeline configuration:")
         logger.info(f"  Device: {device}")
-        logger.info(f"  Detector: {settings.detection_model}")
+        active_detector_path = (
+            settings.detection_model_path
+            if self.detector.backend == "hailo"
+            else settings.detection_model
+        )
+        logger.info(f"  Detector: {active_detector_path} ({self.detector.backend})")
         logger.info(f"  Classifier: {self.classifier.backend} ({self.classifier.device})")
         if self.wildlife_detector:
             logger.info(f"  Wildlife: {settings.wildlife_model}")
@@ -306,9 +311,14 @@ class BirdPipeline:
 
                 dt = datetime.fromtimestamp(timestamp)
                 if self.save_enabled and self._session_factory and settings.save_crops:
+                    detection_model_name = (
+                        settings.detection_model_path.stem
+                        if self.detector.backend == "hailo"
+                        else Path(settings.detection_model).stem
+                    )
                     self._save_detection(
                         frame, track.bbox, species_name, conf, dt,
-                        detection_model=Path(settings.detection_model).stem,
+                        detection_model=detection_model_name,
                         classifier_model=settings.classifier_model_path.stem,
                         source=self._source,
                     )
