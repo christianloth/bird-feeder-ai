@@ -19,7 +19,7 @@
   "timezone": "browser",
   "title": "Bird Feeder",
   "uid": "bird-feeder-main",
-  "version": 17,
+  "version": 21,
   "weekStart": "",
   "templating": {
     "list": [
@@ -553,58 +553,6 @@
       },
       "collapsed": false,
       "panels": []
-    },
-    {
-      "id": 21,
-      "type": "table",
-      "title": "Top species (range)",
-      "datasource": {
-        "type": "frser-sqlite-datasource",
-        "uid": "birds-db"
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 0,
-        "y": 23
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "left"
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "avg_confidence"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percentunit"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "queryType": "table",
-          "rawQueryText": "SELECT s.common_name AS species, s.scientific_name AS scientific, COUNT(*) AS detections, AVG(d.confidence) AS avg_confidence, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC",
-          "queryText": "SELECT s.common_name AS species, s.scientific_name AS scientific, COUNT(*) AS detections, AVG(d.confidence) AS avg_confidence, MAX(d.timestamp) AS last_seen FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC",
-          "timeColumns": []
-        }
-      ]
     },
     {
       "id": 22,
@@ -1582,6 +1530,116 @@
           "queryType": "table",
           "rawQueryText": "SELECT CASE w.weather_code WHEN 0 THEN 'Clear' WHEN 1 THEN 'Mostly clear' WHEN 2 THEN 'Partly cloudy' WHEN 3 THEN 'Overcast' WHEN 45 THEN 'Fog' WHEN 48 THEN 'Rime fog' WHEN 51 THEN 'Light drizzle' WHEN 53 THEN 'Drizzle' WHEN 55 THEN 'Dense drizzle' WHEN 61 THEN 'Light rain' WHEN 63 THEN 'Rain' WHEN 65 THEN 'Heavy rain' WHEN 71 THEN 'Light snow' WHEN 73 THEN 'Snow' WHEN 75 THEN 'Heavy snow' WHEN 80 THEN 'Rain showers' WHEN 81 THEN 'Heavy showers' WHEN 82 THEN 'Violent showers' WHEN 95 THEN 'Thunderstorm' WHEN 96 THEN 'T-storm w/ hail' WHEN 99 THEN 'Severe t-storm' ELSE 'Code ' || w.weather_code END AS condition, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.weather_code IS NOT NULL GROUP BY condition ORDER BY detections DESC",
           "queryText": "SELECT CASE w.weather_code WHEN 0 THEN 'Clear' WHEN 1 THEN 'Mostly clear' WHEN 2 THEN 'Partly cloudy' WHEN 3 THEN 'Overcast' WHEN 45 THEN 'Fog' WHEN 48 THEN 'Rime fog' WHEN 51 THEN 'Light drizzle' WHEN 53 THEN 'Drizzle' WHEN 55 THEN 'Dense drizzle' WHEN 61 THEN 'Light rain' WHEN 63 THEN 'Rain' WHEN 65 THEN 'Heavy rain' WHEN 71 THEN 'Light snow' WHEN 73 THEN 'Snow' WHEN 75 THEN 'Heavy snow' WHEN 80 THEN 'Rain showers' WHEN 81 THEN 'Heavy showers' WHEN 82 THEN 'Violent showers' WHEN 95 THEN 'Thunderstorm' WHEN 96 THEN 'T-storm w/ hail' WHEN 99 THEN 'Severe t-storm' ELSE 'Code ' || w.weather_code END AS condition, COUNT(*) AS detections FROM detections d JOIN weather_observations w ON strftime('%Y-%m-%d %H', d.timestamp) = strftime('%Y-%m-%d %H', w.timestamp) WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 AND w.weather_code IS NOT NULL GROUP BY condition ORDER BY detections DESC",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 71,
+      "type": "barchart",
+      "title": "Top species (bar length = count, color = avg confidence %)",
+      "description": "Bar length is detection count; bar color reflects average classifier confidence for that species (red <60% \u2192 yellow 60\u201375% \u2192 green >75%).",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "birds-db"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "fillOpacity": 92,
+            "lineWidth": 0,
+            "gradientMode": "none",
+            "axisPlacement": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_conf_pct"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "#ff9830",
+                      "value": 55
+                    },
+                    {
+                      "color": "#ecbb13",
+                      "value": 65
+                    },
+                    {
+                      "color": "#7eb26d",
+                      "value": 75
+                    },
+                    {
+                      "color": "green",
+                      "value": 85
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "species",
+        "colorByField": "avg_conf_pct",
+        "showValue": "always",
+        "stacking": "none",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelMaxLength": 40,
+        "barWidth": 0.85
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT s.common_name AS species, COUNT(*) AS detections, ROUND(AVG(d.confidence)*100, 1) AS avg_conf_pct FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC LIMIT 20",
+          "queryText": "SELECT s.common_name AS species, COUNT(*) AS detections, ROUND(AVG(d.confidence)*100, 1) AS avg_conf_pct FROM detections d JOIN species s ON s.id = d.species_id WHERE strftime('%s', d.timestamp) * 1000 BETWEEN $__from AND $__to AND d.is_false_positive = 0 GROUP BY d.species_id ORDER BY detections DESC LIMIT 20",
           "timeColumns": []
         }
       ]

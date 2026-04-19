@@ -39,6 +39,7 @@ class BirdClassifier:
         ort_session=None,
         hef_model=None,
         class_names: dict[int, str] | None = None,
+        idx_to_class_id: dict[int, int] | None = None,
         device: torch.device | None = None,
         confidence_threshold: float | None = None,
         input_size: int = 224,
@@ -48,6 +49,10 @@ class BirdClassifier:
         self._ort_session = ort_session
         self._hef_model = hef_model
         self.class_names = class_names or {}
+        # Maps the classifier's contiguous output index (0..N-1) back to the
+        # original NABirds class ID from classes.txt. Empty if unavailable
+        # (e.g. NABirds data missing in a minimal deployment).
+        self.idx_to_class_id = idx_to_class_id or {}
         self.device = device
         from config.settings import settings
         self.confidence_threshold = confidence_threshold or settings.classification_confidence_threshold
@@ -59,6 +64,7 @@ class BirdClassifier:
         cls,
         checkpoint_path: str | Path,
         class_names: dict[int, str] | None = None,
+        idx_to_class_id: dict[int, int] | None = None,
         num_classes: int = 555,
         device: str | None = None,
         confidence_threshold: float | None = None,
@@ -95,6 +101,7 @@ class BirdClassifier:
             backend="pytorch",
             model=model,
             class_names=class_names,
+            idx_to_class_id=idx_to_class_id,
             device=dev,
             confidence_threshold=confidence_threshold,
             input_size=model_config["input_size"],
@@ -105,6 +112,7 @@ class BirdClassifier:
         cls,
         onnx_path: str | Path,
         class_names: dict[int, str] | None = None,
+        idx_to_class_id: dict[int, int] | None = None,
         confidence_threshold: float | None = None,
     ) -> "BirdClassifier":
         """Load an ONNX model for cross-platform inference."""
@@ -118,6 +126,7 @@ class BirdClassifier:
             backend="onnx",
             ort_session=session,
             class_names=class_names,
+            idx_to_class_id=idx_to_class_id,
             confidence_threshold=confidence_threshold,
         )
 
@@ -126,6 +135,7 @@ class BirdClassifier:
         cls,
         hef_path: str | Path,
         class_names: dict[int, str] | None = None,
+        idx_to_class_id: dict[int, int] | None = None,
         confidence_threshold: float | None = None,
         vdevice=None,
     ) -> "BirdClassifier":
@@ -157,6 +167,7 @@ class BirdClassifier:
                 "configured": configured_model,
             },
             class_names=class_names,
+            idx_to_class_id=idx_to_class_id,
             confidence_threshold=confidence_threshold,
             input_size=input_shape[0],
         )

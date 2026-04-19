@@ -36,6 +36,15 @@ bird_detection:
 species_classification:
   hef_model: "vit_small_birds.hef"  # HEF model filename in models/hef/
   confidence_threshold: 0.60  # min confidence to accept a species prediction
+  # Species to suppress entirely. IDs are from data/nabirds/classes.txt
+  # (first column — e.g. 338 = "California Quail (Male)"). If the classifier's
+  # top prediction (after logit averaging) lands on one of these, the
+  # detection is dropped — no database save, no alert. Useful for silencing
+  # persistent false positives.
+  disabled_species_ids: []
+  # Example:
+  # disabled_species_ids:
+  #   - 338   # California Quail (Male)
 
 # --- Nighttime: Wildlife Detection (single-stage) ---
 # Custom YOLO that detects AND classifies 11 wildlife classes in one shot.

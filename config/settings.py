@@ -63,6 +63,13 @@ class Settings:
     classifier_model_path: Path = field(default=None)  # Hailo HEF path
     classification_confidence_threshold: float = _species_classification.get("confidence_threshold", 0.30)
     num_species: int = 555  # NABirds dataset
+    # NABirds class IDs (from data/nabirds/classes.txt) to suppress.
+    # Resolved to species names by the pipeline at startup.
+    disabled_species_ids: frozenset[int] = field(default_factory=lambda: frozenset(
+        int(i)
+        for i in (_species_classification.get("disabled_species_ids") or [])
+        if isinstance(i, (int, str)) and str(i).strip().lstrip("-").isdigit()
+    ))
 
     # Nighttime: Wildlife Detection (single-stage YOLO)
     wildlife_model: str = _wildlife_detection.get("model", "")

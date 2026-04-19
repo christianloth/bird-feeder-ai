@@ -27,6 +27,7 @@ from src.backend.database import (
     load_species_from_dataset,
     load_wildlife_species,
     migrate_species_category,
+    migrate_species_nabirds_id,
 )
 from src.backend.storage import ImageStorage
 from src.inference.classifier import BirdClassifier
@@ -104,12 +105,24 @@ class BirdPipeline:
             logger.info("  Storage: off (use --output for annotated output)")
         else:
             logger.info("  Storage: DISABLED (--no-save)")
+        if settings.disabled_species_ids:
+            if not self.classifier.idx_to_class_id:
+                logger.warning(
+                    f"  Disabled species: {sorted(settings.disabled_species_ids)} "
+                    f"configured but idx_to_class_id mapping unavailable — "
+                    f"suppression will NOT take effect"
+                )
+            else:
+                logger.info(
+                    f"  Disabled species: {sorted(settings.disabled_species_ids)}"
+                )
 
     def _init_database(self):
         """Initialize database tables and species lookup."""
         logger.debug("Initializing database connection")
         engine = create_tables()
         migrate_species_category(engine)
+        migrate_species_nabirds_id(engine)
         self._session_factory = get_session_factory(engine)
 
         # Load species from NABirds if not already in DB
@@ -308,6 +321,16 @@ class BirdPipeline:
                     f"Track {track.track_id} confidently classified: "
                     f"{species_name} ({conf:.2f}) after {track.classify_count} frames"
                 )
+
+                # Suppress disabled species: track is locked in to stop
+                # re-classification, but no save/emit so no alert fires.
+                nabirds_id = self.classifier.idx_to_class_id.get(class_idx)
+                if nabirds_id is not None and nabirds_id in settings.disabled_species_ids:
+                    logger.info(
+                        f"Suppressed disabled species: {species_name} "
+                        f"(nabirds_id={nabirds_id}, {conf:.2f}) track={track.track_id}"
+                    )
+                    continue
 
                 dt = datetime.fromtimestamp(timestamp)
                 if self.save_enabled and self._session_factory and settings.save_crops:
@@ -766,13 +789,15 @@ def create_pipeline_dev(
     """
     detector = BirdDetector.from_ultralytics(device=device)
 
-    # Load class names from dataset if not provided
+    # Load mappings from dataset if class_names not provided
+    idx_to_class_id: dict[int, int] = {}
     if class_names is None:
-        class_names = _load_class_names()
+        class_names, idx_to_class_id = _load_classifier_mappings()
 
     classifier = BirdClassifier.from_pytorch(
         checkpoint_path=checkpoint_path,
         class_names=class_names,
+        idx_to_class_id=idx_to_class_id,
         device=device,
     )
 
@@ -817,12 +842,14 @@ def create_pipeline_hailo(
 
     detector = BirdDetector.from_hailo(hef_path=detection_hef, vdevice=vdevice)
 
+    idx_to_class_id: dict[int, int] = {}
     if class_names is None:
-        class_names = _load_class_names()
+        class_names, idx_to_class_id = _load_classifier_mappings()
 
     classifier = BirdClassifier.from_hailo(
         hef_path=classifier_hef or settings.classifier_model_path,
         class_names=class_names,
+        idx_to_class_id=idx_to_class_id,
         vdevice=vdevice,
     )
 
@@ -846,18 +873,28 @@ def create_pipeline_hailo(
     )
 
 
-def _load_class_names() -> dict[int, str]:
-    """Load class names from the NABirds dataset for prediction display."""
+def _load_classifier_mappings() -> tuple[dict[int, str], dict[int, int]]:
+    """Load NABirds mappings: (class_idx -> species_name, class_idx -> nabirds_id).
+
+    The nabirds_id is the original (non-contiguous) class ID from classes.txt
+    that's useful for matching config/DB values back to the classifier output.
+    """
     from src.training.dataset import NABirdsDataset
     from src.training.transforms import get_val_transforms
 
     data_dir = settings.data_dir / "nabirds"
     if not data_dir.exists():
         logger.warning(f"NABirds data not found at {data_dir}, class names unavailable")
-        return {}
+        return {}, {}
 
     dataset = NABirdsDataset(data_dir, split="train", transform=get_val_transforms())
-    return dataset.class_to_species
+    return dataset.class_to_species, dict(dataset._idx_to_class_id)
+
+
+def _load_class_names() -> dict[int, str]:
+    """Back-compat shim for callers that only want the name mapping."""
+    class_names, _ = _load_classifier_mappings()
+    return class_names
 
 
 if __name__ == "__main__":
