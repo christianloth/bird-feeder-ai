@@ -56,3 +56,6 @@ data/
 
 # Runtime pidfiles (created by scripts/start_*.sh)
 /run/
+
+# GstShark tracer output
+gstshark_*/
