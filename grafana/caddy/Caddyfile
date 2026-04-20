@@ -6,10 +6,6 @@
 }
 
 (site) {
-	basic_auth {
-		{$CADDY_BASIC_AUTH_USER} {$CADDY_BASIC_AUTH_HASH}
-	}
-
 	handle /grafana/* {
 		reverse_proxy grafana:3000
 	}
