@@ -17,7 +17,11 @@
     <div class="info">
         <div class="species-name">{{ d.species.common_name if d.species else "Unknown" }}</div>
         <div class="meta-line">
-            {{ d.timestamp.strftime('%Y-%m-%d %H:%M:%S') if d.timestamp else 'N/A' }}
+            {% if d.timestamp %}
+            <time class="local-time" datetime="{{ d.timestamp.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ d.timestamp.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time>
+            {% else %}
+            N/A
+            {% endif %}
         </div>
         <div class="meta-line">
             {% set conf_pct = (d.confidence * 100) | round(1) %}

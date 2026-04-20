@@ -22,7 +22,12 @@
 
     <div class="meta">
         ID #{{ detection.id }} |
-        {{ detection.timestamp.strftime('%Y-%m-%d %H:%M:%S') if detection.timestamp else 'N/A' }} |
+        {% if detection.timestamp %}
+        <time class="local-time" datetime="{{ detection.timestamp.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ detection.timestamp.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time>
+        {% else %}
+        N/A
+        {% endif %}
+        |
         {{ detection.detection_model or 'unknown' }} |
         Source: {{ detection.source or 'unknown' }} |
         <strong>{{ pending }}</strong> remaining
