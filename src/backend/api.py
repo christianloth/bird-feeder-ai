@@ -5,6 +5,7 @@ Provides endpoints for querying detections, species stats, weather data,
 and system status. Will be consumed by the future dashboard.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
@@ -41,6 +42,7 @@ from src.backend.schemas import (
     SystemStatus,
 )
 from src.backend.weather import WeatherService, describe_weather_code
+from src.backend.weather_ingest import run_periodic_ingest, sync_weather
 from src.backend.storage import ImageStorage
 
 logger = logging.getLogger(__name__)
@@ -70,8 +72,23 @@ async def lifespan(app: FastAPI):
     _image_storage = ImageStorage()
     _start_time = datetime.now()
 
+    try:
+        await asyncio.to_thread(sync_weather, _session_factory, _weather_service)
+    except Exception:
+        logger.exception("Initial weather sync failed; will retry on schedule")
+
+    ingest_task = asyncio.create_task(
+        run_periodic_ingest(_session_factory, _weather_service)
+    )
+
     logger.info("Bird Feeder AI API started.")
     yield
+
+    ingest_task.cancel()
+    try:
+        await ingest_task
+    except asyncio.CancelledError:
+        pass
 
     if _weather_service:
         _weather_service.close()
