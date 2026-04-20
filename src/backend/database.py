@@ -50,6 +50,10 @@ class Species(Base):
     scientific_name: Mapped[str] = mapped_column(String(200), nullable=False)
     family: Mapped[str | None] = mapped_column(String(200))
     class_index: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    # Original NABirds classes.txt ID (non-contiguous, e.g. 338 for
+    # "California Quail (Male)"). Nullable because wildlife species have no
+    # NABirds mapping. Unique among non-null values.
+    nabirds_id: Mapped[int | None] = mapped_column(Integer, unique=True, index=True)
     category: Mapped[str] = mapped_column(String(20), default="bird", server_default="bird")
 
     detections: Mapped[list["Detection"]] = relationship(
@@ -180,11 +184,13 @@ def load_species_from_dataset(session: Session, nabirds_dir: Path) -> None:
     from src.training.transforms import get_val_transforms
 
     dataset = NABirdsDataset(nabirds_dir, split="train", transform=get_val_transforms())
+    idx_to_class_id = dict(dataset._idx_to_class_id)
     for class_idx, species_name in dataset.class_to_species.items():
         species = Species(
             common_name=species_name,
             scientific_name=species_name,
             class_index=class_idx,
+            nabirds_id=idx_to_class_id.get(class_idx),
             category="bird",
         )
         session.add(species)
@@ -235,4 +241,43 @@ def migrate_species_category(engine) -> None:
     if "category" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE species ADD COLUMN category VARCHAR(20) DEFAULT 'bird'"))
+
+
+def migrate_species_nabirds_id(engine) -> None:
+    """Add nabirds_id column + backfill from NABirds dataset (bird rows only).
+
+    Backfill joins on class_index using the deterministic contiguous→NABirds-id
+    mapping from NABirdsDataset. Safe to run repeatedly.
+    """
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("species")]
+    if "nabirds_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE species ADD COLUMN nabirds_id INTEGER"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_species_nabirds_id "
+                "ON species (nabirds_id) WHERE nabirds_id IS NOT NULL"
+            ))
+
+    # Backfill any bird rows that still have NULL nabirds_id
+    nabirds_dir = settings.data_dir / "nabirds"
+    if not nabirds_dir.exists():
+        return
+    from src.training.dataset import NABirdsDataset
+    from src.training.transforms import get_val_transforms
+    dataset = NABirdsDataset(nabirds_dir, split="train", transform=get_val_transforms())
+    idx_to_class_id = dict(dataset._idx_to_class_id)
+
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            "SELECT id, class_index FROM species "
+            "WHERE category = 'bird' AND nabirds_id IS NULL"
+        )).fetchall()
+        for species_id, class_idx in rows:
+            nabirds_id = idx_to_class_id.get(class_idx)
+            if nabirds_id is not None:
+                conn.execute(
+                    text("UPDATE species SET nabirds_id = :nid WHERE id = :sid"),
+                    {"nid": nabirds_id, "sid": species_id},
+                )
 

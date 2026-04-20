@@ -53,3 +53,9 @@ data/
 /.browser-sessions/
 /mediamtx/videos/*
 !/mediamtx/videos/.gitkeep
+
+# Runtime pidfiles (created by scripts/start_*.sh)
+/run/
+
+# GstShark tracer output
+gstshark_*/

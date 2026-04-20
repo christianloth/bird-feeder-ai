@@ -1,0 +1,33 @@
+{
+	admin off
+	auto_https disable_redirects
+	local_certs
+	default_sni 192.168.1.211
+}
+
+(site) {
+	basic_auth {
+		{$CADDY_BASIC_AUTH_USER} {$CADDY_BASIC_AUTH_HASH}
+	}
+
+	handle /grafana/* {
+		reverse_proxy grafana:3000
+	}
+
+	handle /grafana {
+		redir /grafana/ permanent
+	}
+
+	handle {
+		reverse_proxy {$API_UPSTREAM}
+	}
+}
+
+:80 {
+	import site
+}
+
+https://192.168.1.211, https://localhost, https://127.0.0.1 {
+	tls internal
+	import site
+}
