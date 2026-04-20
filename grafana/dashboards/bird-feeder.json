@@ -505,43 +505,6 @@
       ]
     },
     {
-      "id": 13,
-      "type": "heatmap",
-      "title": "Activity by hour of day vs day of week",
-      "datasource": {
-        "type": "frser-sqlite-datasource",
-        "uid": "birds-db"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 14
-      },
-      "options": {
-        "calculate": false,
-        "cellGap": 2,
-        "color": {
-          "scheme": "Oranges",
-          "mode": "scheme",
-          "steps": 64,
-          "reverse": false
-        },
-        "yAxis": {
-          "axisPlacement": "left"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "queryType": "table",
-          "rawQueryText": "SELECT CAST(strftime('%w', timestamp, 'localtime') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) AS hour, COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0 GROUP BY dow, hour ORDER BY dow, hour",
-          "queryText": "SELECT CAST(strftime('%w', timestamp, 'localtime') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) AS hour, COUNT(*) AS detections FROM detections WHERE strftime('%s', timestamp) * 1000 BETWEEN $__from AND $__to AND is_false_positive = 0 GROUP BY dow, hour ORDER BY dow, hour",
-          "timeColumns": []
-        }
-      ]
-    },
-    {
       "id": 20,
       "type": "row",
       "title": "Species breakdown",
