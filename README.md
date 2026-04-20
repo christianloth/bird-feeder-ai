@@ -50,7 +50,7 @@ The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night 
 4. **Storage** -- Detection saved to SQLite with species, confidence, bbox coordinates, and one full frame image (crops generated on-the-fly)
 
 **Nighttime pipeline (wildlife):**
-1. **Detection** -- YOLO11n wildlife model detects 11 classes: bird, bobcat, coyote, raccoon, rabbit, skunk, opossum, squirrel, armadillo, cat, dog
+1. **Detection** -- YOLO11s wildlife model detects 11 classes: bird, bobcat, coyote, raccoon, rabbit, skunk, opossum, squirrel, armadillo, cat, dog
 2. **Tracking** -- Same tracker, reset on mode switch
 3. **Storage** -- Same storage path, species comes directly from the YOLO model (no separate classifier)
 
@@ -145,6 +145,9 @@ The RTSP URL comes from `config/config.yaml`. The pipeline runs continuously unt
 | `--device {cuda,mps,cpu}` | Auto (CUDA → MPS → CPU) | Force compute device |
 | `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` | From config | Logging verbosity |
 | `--no-night` | Off | Disable night mode (daytime bird detection only) |
+| `--day` / `--night` | Auto | Force day or night mode (mutually exclusive) |
+| `--virtual-rtsp` | Off | Loop a `--video` file through an in-process RTSP server to exercise the full pipeline |
+| `--output` | Off | Write an annotated video alongside the input (video mode only) |
 | `--no-save` | Off | Disable saving to database and disk (log only) |
 
 ### Examples
@@ -199,6 +202,17 @@ python -m src.pipeline.pipeline --mode hailo
 
 Uses pre-compiled HEF models on the Hailo NPU. Model paths are configurable in `config/config.yaml`.
 
+### Running as a background process
+
+The `scripts/` directory has detach/attach helpers that log to `pipeline.log` / `backend.log` and track PIDs in `run/`:
+
+```bash
+scripts/start_pipeline.sh   # Start pipeline detached (hailo mode)
+scripts/stop_pipeline.sh    # Graceful stop (SIGTERM, escalates to SIGKILL)
+scripts/start_backend.sh    # Start the uvicorn API server detached
+scripts/stop_backend.sh     # Stop the API server
+```
+
 ### What gets saved per detection
 
 Each detection saves one full frame image and a database row:
@@ -233,21 +247,30 @@ uvicorn src.backend.api:app --host 0.0.0.0 --port 8000
 
 Interactive API docs: `http://localhost:8000/docs`
 
-### Review detections
+### Dashboard and review UI
 
-Open `http://localhost:8000/review` to review detections. Keyboard shortcuts: **A** = confirm, **X** = false positive, **C** = correct species, **Esc** = cancel.
+- **Dashboard** — `http://localhost:8000/dashboard` shows a filterable gallery with stats (total, unique species, today's count, avg confidence, disk usage). Timestamps render in the browser's local time zone.
+- **Review** — `http://localhost:8000/review` walks through pending detections one at a time. Keyboard shortcuts: **A** = confirm, **X** = false positive, **C** = correct species, **Esc** = cancel.
 
 ### Key endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Health check |
+| `GET` | `/dashboard` | Dashboard UI (HTMX) |
+| `GET` | `/api/dashboard/gallery` | HTMX fragment powering the dashboard gallery (filters + pagination) |
 | `GET` | `/review` | Detection review UI (HTMX) |
+| `GET` | `/api/review/next` | Next pending detection as an HTMX card |
+| `POST` | `/api/review/{id}/confirm` | Mark detection reviewed |
+| `POST` | `/api/review/{id}/reject` | Mark as false positive |
+| `POST` | `/api/review/{id}/correct/{species_id}` | Correct to another species |
 | `GET` | `/api/detections` | List detections (filterable by species, date, confidence) |
 | `GET` | `/api/detections/{id}` | Get a single detection with all metadata |
 | `GET` | `/api/detections/{id}/crop` | Cropped detection image (generated on-the-fly) |
 | `GET` | `/api/detections/{id}/frame` | Full frame image |
+| `GET` | `/api/detections/{id}/annotated` | Full frame with bbox + species label drawn on |
 | `PATCH` | `/api/detections/{id}/review` | Review: confirm, reject, or correct species |
+| `DELETE` | `/api/detections/{id}` | Delete a detection (removes row + image) |
 | `GET` | `/api/stats` | Overall detection statistics |
 | `GET` | `/api/stats/species` | Detection count per species |
 | `GET` | `/api/stats/hourly` | Hourly detection counts for a given day |
@@ -257,6 +280,8 @@ Open `http://localhost:8000/review` to review detections. Keyboard shortcuts: **
 | `GET` | `/api/daily` | Daily summary data (last N days) |
 | `GET` | `/api/system/status` | System health (disk usage, uptime, detection count) |
 | `POST` | `/api/system/cleanup` | Trigger old image cleanup |
+
+Weather is backfilled and polled hourly by `src/backend/weather_ingest.py` (Open-Meteo API) into the `weather_observations` table, which powers the weather-correlation panels on the Grafana dashboard.
 
 ### Query parameters for `/api/detections`
 
@@ -292,6 +317,42 @@ curl -X PATCH http://localhost:8000/api/detections/1/review \
 ```
 
 The corrected species label is used when exporting training data, so your corrections feed back into the next model.
+
+## Monitoring Dashboard (Grafana)
+
+A provisioned Grafana dashboard lives at `grafana/`. It's fronted by Caddy with basic auth so a single tunnel (e.g. ngrok) can expose both Grafana and the FastAPI dashboard safely.
+
+```
+[browser] ──▶ Caddy :80 (basic auth)
+                ├── /grafana/*  ──▶ grafana:3000
+                └── /*          ──▶ host FastAPI :8000
+```
+
+Grafana runs in anonymous-viewer mode, so the Caddy password is the only prompt you hit. SQLite is bind-mounted **read-only** into the container.
+
+### Start the stack
+
+```bash
+cp grafana/.env.example grafana/.env
+# Generate a bcrypt hash for the basic-auth password, paste into grafana/.env
+# (every $ must be doubled to $$ for docker-compose):
+docker run --rm caddy:2 caddy hash-password --plaintext 'yourpassword'
+
+cd grafana
+docker compose --env-file .env up -d
+```
+
+Visit `http://<pi-ip>/grafana/` and log in with the Caddy credentials. The "Bird Feeder" dashboard is auto-provisioned.
+
+### Panels
+- **At a glance** — detections in range / today / all-time, unique species, most common today, avg confidence
+- **Activity over time** — bucketed bar chart stacked by top-N species
+- **Species breakdown** — top species table, donut, most-frequent-per-day
+- **Quality & curation** — confidence histogram, false-positive rate, % reviewed
+- **Weather correlations** — detections vs temperature / cloud cover / wind / humidity
+- **Detection gallery** — latest spotlight + recent-detections table with thumbnail crops
+
+See `grafana/README.md` for full setup, dashboard editing, and external exposure notes.
 
 ## Exporting Training Data
 
@@ -475,14 +536,28 @@ This file is gitignored (contains camera credentials). Key settings:
 |---|---|---|---|
 | Top-level | `log_level` | `INFO` | Logging verbosity |
 | `camera` | `rtsp_url` | -- | Camera RTSP stream URL |
-| `detection` | `confidence_threshold` | `0.4` | Minimum YOLO detection confidence |
-| `classification` | `confidence_threshold` | `0.10` | Minimum species classification confidence |
-| `wildlife` | `confidence_threshold` | `0.4` | Minimum wildlife detection confidence |
-| `day_night` | `enabled` | `true` | Enable automatic day/night mode switching |
+| `camera` | `codec` | `h264` | `h264` (FFMPEG) or `h265` (GStreamer SW decode) |
+| `camera` | `rotation_degrees` | `0` | Rotate frames; positive = CCW, negative = CW |
+| `bird_detection` | `model` | `yolo11n.pt` | PyTorch/ONNX model for bird detection (dev mode) |
+| `bird_detection` | `hef_model` | `yolov11s.hef` | Hailo HEF model filename (hailo mode) |
+| `bird_detection` | `confidence_threshold` | `0.4` | Minimum YOLO bird-detection confidence |
+| `bird_detection` | `bird_class_id` | `14` | COCO class ID for "bird" |
+| `species_classification` | `hef_model` | `vit_small_birds.hef` | Classifier HEF filename |
+| `species_classification` | `confidence_threshold` | `0.60` | Minimum species-classification confidence |
+| `species_classification` | `disabled_species_ids` | `[]` | Suppress specific species IDs entirely |
+| `wildlife_detection` | `model` | `yolo11s-wildlife-equal` | Custom wildlife YOLO (11 classes) |
+| `wildlife_detection` | `confidence_threshold` | `0.4` | Minimum wildlife-detection confidence |
+| `day_night` | `mode_check_interval` | `60` | Seconds between sun-time checks |
 | `day_night` | `night_offset_minutes` | `30` | Start night mode N minutes after sunset |
 | `day_night` | `day_offset_minutes` | `30` | Start day mode N minutes before sunrise |
 | `pipeline` | `process_every_n` | `5` | Process every Nth frame |
+| `pipeline` | `species_cooldown_seconds` | `120` | Suppress duplicate saves of same species for N seconds |
+| `pipeline` | `min_frames_for_detection` | `3` | Consecutive-frame count before a track is classified |
 | `location` | `latitude` / `longitude` | Frisco, TX | Location for sunrise/sunset calculation |
+| `location` | `timezone` | `America/Chicago` | IANA tz for mode transitions |
+| `storage` | `save_crops` | `true` | Save cropped images alongside full frames |
+| `storage` | `crop_quality` / `thumbnail_quality` | `85` / `75` | JPEG quality for crops / thumbnails |
+| `storage` | `thumbnail_size` | `[200, 200]` | Thumbnail dimensions |
 | `storage` | `retention_days` | `90` | Delete detection images older than this |
 
 ## License
