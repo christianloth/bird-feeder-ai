@@ -3,6 +3,10 @@ services:
     image: grafana/grafana:latest
     container_name: bird-feeder-grafana
     restart: unless-stopped
+    # Run as host 'pi' (uid 1000) so SQLite can create/update the WAL index file
+    # (-shm) in the bind-mounted db directory. WAL-mode readers are not purely
+    # read-only — they must be able to write -shm even when just querying.
+    user: "1000:1000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-prettybirds}
@@ -18,9 +22,11 @@ services:
       - grafana_storage:/var/lib/grafana
       - ./provisioning:/etc/grafana/provisioning:ro
       - ./dashboards:/var/lib/grafana/dashboards:ro
-      - ../db/birds.db:/var/lib/bird-feeder/birds.db:ro
-      - ../db/birds.db-wal:/var/lib/bird-feeder/birds.db-wal:ro
-      - ../db/birds.db-shm:/var/lib/bird-feeder/birds.db-shm:ro
+      # Bind the whole db directory (not individual files) so SQLite can freely
+      # create/recreate the -wal and -shm files. File-level bind mounts pin the
+      # inode at container start and go stale the moment SQLite unlinks or
+      # recreates the journal files (which happens on every WAL checkpoint).
+      - ../db:/var/lib/bird-feeder
 
   caddy:
     image: caddy:2

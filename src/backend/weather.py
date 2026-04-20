@@ -148,7 +148,9 @@ class WeatherService:
                 "wind_speed_10m",
                 "weather_code",
             ],
-            "timezone": self.timezone,
+            # Request UTC so parsed timestamps can be stored as naive UTC, matching
+            # detection timestamps. Grafana + any other reader renders in viewer TZ.
+            "timezone": "UTC",
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
         }

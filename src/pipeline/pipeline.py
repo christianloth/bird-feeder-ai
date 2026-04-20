@@ -13,7 +13,7 @@ import logging
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -332,7 +332,7 @@ class BirdPipeline:
                     )
                     continue
 
-                dt = datetime.fromtimestamp(timestamp)
+                dt = datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(tzinfo=None)
                 if self.save_enabled and self._session_factory and settings.save_crops:
                     detection_model_name = (
                         settings.detection_model_path.stem
@@ -401,7 +401,8 @@ class BirdPipeline:
                         track.track_id, track.species, track.confidence,
                     )
 
-                    dt = datetime.fromtimestamp(timestamp)
+                    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(tzinfo=None)
+                    # ^ naive UTC (timestamps stored UTC in DB; Grafana renders in browser TZ)
                     if self.save_enabled and self._session_factory and settings.save_crops:
                         self._save_detection(
                             frame, track.bbox, track.species, track.confidence, dt,
