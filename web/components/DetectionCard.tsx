@@ -22,11 +22,6 @@ export function DetectionCard({ detection, onView, onDelete, index }: Props) {
       : "var(--color-rust-500)";
 
   const speciesName = detection.corrected_species_name ?? detection.species_name ?? "Unknown";
-  const status = detection.is_false_positive
-    ? "false-positive"
-    : detection.reviewed
-    ? "confirmed"
-    : "pending";
 
   return (
     <motion.article
@@ -52,32 +47,6 @@ export function DetectionCard({ detection, onView, onDelete, index }: Props) {
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[rgba(7,9,10,0.92)] via-transparent to-transparent"
         />
-        <span
-          className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.65rem] uppercase tracking-[0.16em] backdrop-blur"
-          style={{
-            background:
-              status === "confirmed"
-                ? "rgba(127, 169, 122, 0.14)"
-                : status === "false-positive"
-                ? "rgba(201, 122, 92, 0.14)"
-                : "rgba(140, 154, 143, 0.14)",
-            color:
-              status === "confirmed"
-                ? "var(--color-meadow-300)"
-                : status === "false-positive"
-                ? "var(--color-rust-500)"
-                : "var(--color-sage-100)",
-            border: `1px solid color-mix(in oklab, ${
-              status === "confirmed"
-                ? "var(--color-meadow-500)"
-                : status === "false-positive"
-                ? "var(--color-rust-500)"
-                : "var(--color-moss-500)"
-            } 50%, transparent)`,
-          }}
-        >
-          {status === "false-positive" ? "false +" : status}
-        </span>
       </button>
 
       <div className="flex flex-col gap-2 p-4">
