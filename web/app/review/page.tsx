@@ -30,7 +30,7 @@ export default function ReviewPage() {
   });
 
   const statsQ = useQuery({ queryKey: ["stats"], queryFn: api.stats });
-  const speciesQ = useQuery({ queryKey: ["species"], queryFn: api.species });
+  const speciesQ = useQuery({ queryKey: ["species"], queryFn: () => api.species() });
 
   // Pending count: cheap-ish — fetch a handful of pending and use length, but
   // for accuracy we approximate with detections-since query. The simplest:

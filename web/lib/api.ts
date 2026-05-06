@@ -38,7 +38,11 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   stats: () => jsonFetch<DetectionStats>("/api/stats"),
   systemStatus: () => jsonFetch<SystemStatus>("/api/system/status"),
-  species: () => jsonFetch<Species[]>("/api/species?limit=1000"),
+  species: (opts: { withDetections?: boolean } = {}) => {
+    const qs = new URLSearchParams({ limit: "1000" });
+    if (opts.withDetections) qs.set("with_detections", "true");
+    return jsonFetch<Species[]>(`/api/species?${qs}`);
+  },
   weather: () => jsonFetch<Weather>("/api/weather/current"),
 
   detections: (params: Record<string, string | number | undefined>) => {

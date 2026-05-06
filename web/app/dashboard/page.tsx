@@ -22,7 +22,11 @@ export default function DashboardPage() {
 
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus });
-  const speciesQ = useQuery({ queryKey: ["species"], queryFn: api.species });
+  // Filter dropdown only lists species that have at least one detection.
+  const speciesQ = useQuery({
+    queryKey: ["species", "with-detections"],
+    queryFn: () => api.species({ withDetections: true }),
+  });
 
   const filterParams = useMemo(
     () => ({
@@ -70,13 +74,6 @@ export default function DashboardPage() {
 
   const detections = detectionsQ.data ?? [];
   const speciesList = speciesQ.data ?? [];
-  const visibleSpecies = useMemo(() => {
-    // Only include species we've actually detected, ordered by name
-    const seen = new Set<number>();
-    detections.forEach((d) => d.species_id && seen.add(d.species_id));
-    if (seen.size === 0) return speciesList.slice().sort((a, b) => a.common_name.localeCompare(b.common_name));
-    return speciesList.slice().sort((a, b) => a.common_name.localeCompare(b.common_name));
-  }, [speciesList, detections]);
 
   return (
     <>
@@ -140,7 +137,7 @@ export default function DashboardPage() {
           setFilters(f);
           setPage(1);
         }}
-        species={visibleSpecies}
+        species={speciesList}
       />
 
       {/* Gallery */}
