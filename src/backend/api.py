@@ -753,15 +753,27 @@ def run_cleanup():
 # trailing-slash redirects for /dashboard, /review, etc.
 
 if _WEB_OUT.exists():
-    # Next.js writes the OG image as an extension-less file; StaticFiles guesses
-    # the mime as text/plain by default, which breaks scrapers. Serve it
-    # explicitly as PNG before falling through to the static mount.
+    # Next.js writes file-based metadata images (opengraph-image, icon,
+    # apple-icon) as extension-less files; StaticFiles guesses the mime
+    # as text/plain, which breaks browsers and link-preview scrapers.
+    # Serve them explicitly as PNG before falling through to the mount.
+    def _png_file(name: str):
+        path = _WEB_OUT / name
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"{name} not built")
+        return FileResponse(path, media_type="image/png")
+
     @app.get("/opengraph-image")
     def og_image():
-        path = _WEB_OUT / "opengraph-image"
-        if not path.exists():
-            raise HTTPException(status_code=404, detail="OG image not built")
-        return FileResponse(path, media_type="image/png")
+        return _png_file("opengraph-image")
+
+    @app.get("/icon")
+    def icon():
+        return _png_file("icon")
+
+    @app.get("/apple-icon")
+    def apple_icon():
+        return _png_file("apple-icon")
 
     app.mount(
         "/",
