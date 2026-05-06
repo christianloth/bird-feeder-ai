@@ -1,6 +1,9 @@
 import type {
+  BulkDeleteResponse,
   Detection,
   DetectionStats,
+  FeatureFlags,
+  IgnoreRegion,
   Species,
   SystemStatus,
   Weather,
@@ -62,6 +65,16 @@ export const api = {
 
   deleteDetection: (id: number) =>
     jsonFetch<unknown>(`/api/detections/${id}`, { method: "DELETE" }),
+
+  bulkDelete: (ids: number[]) =>
+    jsonFetch<BulkDeleteResponse>("/api/detections/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+
+  features: () => jsonFetch<FeatureFlags>("/api/features"),
+
+  ignoreRegions: () => jsonFetch<IgnoreRegion[]>("/api/ignore-regions"),
 
   pendingCount: async (): Promise<{ pending: number; total: number }> => {
     const stats = await api.stats();
