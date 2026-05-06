@@ -11,14 +11,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from io import BytesIO
 from typing import Annotated
-from urllib.parse import urlencode
 
 from pathlib import Path as _Path
 
 from PIL import Image
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
-from fastapi.templating import Jinja2Templates
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
@@ -102,8 +101,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_TEMPLATE_DIR = _Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+_WEB_OUT = _Path(__file__).resolve().parents[2] / "web" / "out"
 
 
 def get_db() -> Session:
@@ -426,220 +424,6 @@ def get_detection_frame(detection_id: int, session: SessionDep):
     )
 
 
-# --- Review UI ---
-
-
-@app.get("/review", response_class=HTMLResponse)
-def review_page(request: Request, session: SessionDep):
-    """Serve the detection review UI."""
-    # Count pending reviews
-    pending = (
-        session.query(func.count(Detection.id)).filter(Detection.reviewed.is_(False)).scalar() or 0
-    )
-    total = session.query(func.count(Detection.id)).scalar() or 0
-    reviewed = total - pending
-
-    return templates.TemplateResponse(
-        request=request,
-        name="review.html",
-        context={"pending": pending, "reviewed": reviewed, "total": total},
-    )
-
-
-@app.get("/api/review/next", response_class=HTMLResponse)
-def review_next_card(request: Request, session: SessionDep):
-    """Return the next unreviewed detection as an HTMX card fragment."""
-    detection = (
-        session.query(Detection)
-        .filter(Detection.reviewed.is_(False))
-        .order_by(desc(Detection.confidence))
-        .first()
-    )
-
-    if not detection:
-        return HTMLResponse(
-            '<div id="review-card" class="card empty">'
-            "<h2>All done!</h2><p>No more detections to review.</p>"
-            "</div>"
-        )
-
-    species_name = detection.species.common_name if detection.species else "Unknown"
-
-    # Get species list for correction dropdown (limited to likely species)
-    species_list = session.query(Species).order_by(Species.common_name).all()
-
-    # Count remaining
-    pending = (
-        session.query(func.count(Detection.id)).filter(Detection.reviewed.is_(False)).scalar() or 0
-    )
-    total = session.query(func.count(Detection.id)).scalar() or 0
-
-    return templates.TemplateResponse(
-        request=request,
-        name="review_card.html",
-        context={
-            "detection": detection,
-            "species_name": species_name,
-            "species_list": species_list,
-            "pending": pending,
-            "total": total,
-        },
-    )
-
-
-@app.post("/api/review/{detection_id}/confirm", response_class=HTMLResponse)
-def review_confirm(detection_id: int, request: Request, session: SessionDep):
-    """Confirm a detection as correct and return the next card."""
-    detection = session.get(Detection, detection_id)
-    if detection:
-        detection.reviewed = True
-        detection.is_false_positive = False
-        session.commit()
-    return review_next_card(request, session)
-
-
-@app.post("/api/review/{detection_id}/reject", response_class=HTMLResponse)
-def review_reject(detection_id: int, request: Request, session: SessionDep):
-    """Mark a detection as false positive and return the next card."""
-    detection = session.get(Detection, detection_id)
-    if detection:
-        detection.reviewed = True
-        detection.is_false_positive = True
-        session.commit()
-    return review_next_card(request, session)
-
-
-@app.post("/api/review/{detection_id}/correct/{species_id}", response_class=HTMLResponse)
-def review_correct(
-    detection_id: int,
-    species_id: int,
-    request: Request,
-    session: SessionDep,
-):
-    """Correct the species and return the next card."""
-    detection = session.get(Detection, detection_id)
-    if detection:
-        corrected = session.get(Species, species_id)
-        if not corrected:
-            raise HTTPException(status_code=404, detail="Species not found")
-        detection.reviewed = True
-        detection.is_false_positive = False
-        detection.corrected_species_id = species_id
-        session.commit()
-    return review_next_card(request, session)
-
-
-# --- Dashboard ---
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard_page(request: Request, session: SessionDep):
-    """Serve the main dashboard with gallery, stats, and filters."""
-    total = session.query(func.count(Detection.id)).scalar() or 0
-    unique_species = (
-        session.query(func.count(func.distinct(Detection.species_id)))
-        .filter(Detection.species_id.isnot(None))
-        .scalar()
-        or 0
-    )
-    today_start = datetime.combine(date.today(), datetime.min.time())
-    today_count = (
-        session.query(func.count(Detection.id)).filter(Detection.timestamp >= today_start).scalar()
-        or 0
-    )
-    avg_conf = session.query(func.avg(Detection.confidence)).scalar() or 0.0
-    disk_mb = _image_storage.get_disk_usage_mb()
-
-    species_list = (
-        session.query(Species)
-        .filter(
-            Species.id.in_(
-                session.query(func.distinct(Detection.species_id)).filter(
-                    Detection.species_id.isnot(None)
-                )
-            )
-        )
-        .order_by(Species.common_name)
-        .all()
-    )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard.html",
-        context={
-            "total_detections": total,
-            "unique_species": unique_species,
-            "detections_today": today_count,
-            "avg_confidence": round(avg_conf * 100, 1),
-            "disk_usage_mb": round(disk_mb, 1),
-            "species_list": species_list,
-        },
-    )
-
-
-@app.get("/api/dashboard/gallery", response_class=HTMLResponse)
-def dashboard_gallery(
-    request: Request,
-    session: SessionDep,
-    species_id: str = "",
-    since: str = "",
-    until: str = "",
-    min_confidence: str = "",
-    reviewed: str = "",
-    page: int = 1,
-    per_page: int = 24,
-):
-    """Return gallery grid items as an HTMX fragment."""
-    query = session.query(Detection).join(Detection.species, isouter=True)
-
-    if species_id:
-        query = query.filter(Detection.species_id == int(species_id))
-    if since:
-        query = query.filter(Detection.timestamp >= datetime.fromisoformat(since))
-    if until:
-        until_dt = datetime.fromisoformat(until) + timedelta(days=1)
-        query = query.filter(Detection.timestamp < until_dt)
-    if min_confidence:
-        query = query.filter(Detection.confidence >= float(min_confidence))
-    if reviewed == "pending":
-        query = query.filter(Detection.reviewed.is_(False))
-    elif reviewed == "reviewed":
-        query = query.filter(Detection.reviewed.is_(True), Detection.is_false_positive.is_(False))
-    elif reviewed == "false_positive":
-        query = query.filter(Detection.is_false_positive.is_(True))
-
-    total = query.count()
-    offset = (page - 1) * per_page
-    detections = query.order_by(desc(Detection.timestamp)).offset(offset).limit(per_page).all()
-    has_more = offset + per_page < total
-
-    # Build filter query string for pagination
-    filter_params = {}
-    if species_id:
-        filter_params["species_id"] = species_id
-    if since:
-        filter_params["since"] = since
-    if until:
-        filter_params["until"] = until
-    if min_confidence:
-        filter_params["min_confidence"] = min_confidence
-    if reviewed:
-        filter_params["reviewed"] = reviewed
-    filters_qs = urlencode(filter_params) if filter_params else ""
-
-    return templates.TemplateResponse(
-        request=request,
-        name="gallery_items.html",
-        context={
-            "detections": detections,
-            "page": page,
-            "total": total,
-            "has_more": has_more,
-            "filters": filters_qs,
-        },
-    )
-
-
 # --- Annotated Frame ---
 
 
@@ -758,6 +542,24 @@ def run_cleanup():
     """Manually trigger old image cleanup."""
     deleted = _image_storage.cleanup_old_images()
     return {"deleted_files": deleted}
+
+
+# --- Web frontend (Next.js static export) ---
+# Mounted last so all /api/* and /health routes registered above take precedence.
+# Starlette's StaticFiles(html=True) handles directory-index resolution and
+# trailing-slash redirects for /dashboard, /review, etc.
+
+if _WEB_OUT.exists():
+    app.mount(
+        "/",
+        StaticFiles(directory=str(_WEB_OUT), html=True),
+        name="web",
+    )
+else:
+    logger.warning(
+        "Next.js build output not found at %s. Run `cd web && npm run build`.",
+        _WEB_OUT,
+    )
 
 
 if __name__ == "__main__":
