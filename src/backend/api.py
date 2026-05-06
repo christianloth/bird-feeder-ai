@@ -446,10 +446,20 @@ def list_species(
     session: SessionDep,
     skip: int = 0,
     limit: Annotated[int, Query(le=1000)] = 100,
+    with_detections: bool = False,
 ):
-    """List all known species."""
-    species = session.query(Species).offset(skip).limit(limit).all()
-    return species
+    """List known species. with_detections=true returns only species
+    that have at least one detection in the database."""
+    query = session.query(Species)
+    if with_detections:
+        query = query.filter(
+            Species.id.in_(
+                session.query(func.distinct(Detection.species_id)).filter(
+                    Detection.species_id.isnot(None)
+                )
+            )
+        )
+    return query.order_by(Species.common_name).offset(skip).limit(limit).all()
 
 
 @app.get("/api/species/{species_id}", response_model=SpeciesResponse)
