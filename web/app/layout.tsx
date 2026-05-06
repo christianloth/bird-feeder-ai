@@ -39,8 +39,8 @@ export default function RootLayout({
       <body>
         <Providers>
           <Header />
-          <main className="mx-auto max-w-[1400px] px-6 pb-20 pt-6">{children}</main>
-          <footer className="mx-auto max-w-[1400px] px-6 pb-10 pt-6 text-[0.72rem]">
+          <main className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6">{children}</main>
+          <footer className="mx-auto max-w-[1400px] px-4 pb-10 pt-6 text-[0.72rem] sm:px-6">
             <div className="flex items-center justify-between border-t border-[var(--color-moss-700)] pt-4 text-[var(--color-moss-300)]">
               <span className="eyebrow">an evening with the birds</span>
               <span className="font-mono opacity-70">v0.1 · pi5 · hailo-10h</span>

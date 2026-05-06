@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, imageUrl } from "@/lib/api";
 import type { Detection } from "@/lib/types";
@@ -9,12 +9,13 @@ import { StatCard } from "@/components/StatCard";
 import { Filters, EMPTY_FILTERS, type FilterValues } from "@/components/Filters";
 import { DetectionCard } from "@/components/DetectionCard";
 import { Modal } from "@/components/Modal";
+import { Pagination } from "@/components/Pagination";
 
 const PER_PAGE = 24;
 
 export default function DashboardPage() {
   const [filters, setFilters] = useState<FilterValues>(EMPTY_FILTERS);
-  const [limit, setLimit] = useState(PER_PAGE);
+  const [page, setPage] = useState(1);
   const [viewing, setViewing] = useState<Detection | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Detection | null>(null);
   const qc = useQueryClient();
@@ -23,36 +24,45 @@ export default function DashboardPage() {
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus });
   const speciesQ = useQuery({ queryKey: ["species"], queryFn: api.species });
 
-  const detectionsParams = useMemo(
+  const filterParams = useMemo(
     () => ({
       species_id: filters.species_id || undefined,
       since: filters.since ? `${filters.since}T00:00:00` : undefined,
       until: filters.until ? `${filters.until}T23:59:59` : undefined,
       min_confidence: filters.min_confidence || undefined,
-      limit,
+      reviewed: filters.reviewed || undefined,
     }),
-    [filters, limit]
+    [filters]
   );
 
+  const countQ = useQuery({
+    queryKey: ["detections-count", filterParams],
+    queryFn: () => api.detectionsCount(filterParams),
+  });
+
+  const total = countQ.data ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+
+  // Clamp page if filter shrinks the result set under the current page
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   const detectionsQ = useQuery({
-    queryKey: ["detections", detectionsParams, filters.reviewed],
-    queryFn: async () => {
-      const all = await api.detections(detectionsParams);
-      // Backend doesn't filter by review status — apply client-side
-      if (!filters.reviewed) return all;
-      return all.filter((d) => {
-        if (filters.reviewed === "pending") return !d.reviewed;
-        if (filters.reviewed === "reviewed") return d.reviewed && !d.is_false_positive;
-        if (filters.reviewed === "false_positive") return d.is_false_positive;
-        return true;
-      });
-    },
+    queryKey: ["detections", filterParams, page],
+    queryFn: () =>
+      api.detections({
+        ...filterParams,
+        skip: (page - 1) * PER_PAGE,
+        limit: PER_PAGE,
+      }),
   });
 
   const del = useMutation({
     mutationFn: (id: number) => api.deleteDetection(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["detections"] });
+      qc.invalidateQueries({ queryKey: ["detections-count"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       setPendingDelete(null);
     },
@@ -124,7 +134,14 @@ export default function DashboardPage() {
       <div className="my-8 h-px bg-gradient-to-r from-transparent via-[var(--color-moss-700)] to-transparent" />
 
       {/* Filters */}
-      <Filters values={filters} onChange={(f) => { setFilters(f); setLimit(PER_PAGE); }} species={visibleSpecies} />
+      <Filters
+        values={filters}
+        onChange={(f) => {
+          setFilters(f);
+          setPage(1);
+        }}
+        species={visibleSpecies}
+      />
 
       {/* Gallery */}
       <section>
@@ -135,9 +152,9 @@ export default function DashboardPage() {
           <span className="eyebrow">
             {detectionsQ.isPending
               ? "loading…"
-              : detections.length > 0
-              ? `${detections.length} shown`
-              : "0 in range"}
+              : total === 0
+              ? "0 in range"
+              : `${(page - 1) * PER_PAGE + 1}–${Math.min(page * PER_PAGE, total)} of ${formatNumber(total)}`}
           </span>
         </header>
 
@@ -164,43 +181,45 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {detections.length === limit ? (
-          <div className="mt-8 flex justify-center">
-            <button
-              type="button"
-              className="btn-quiet"
-              onClick={() => setLimit((l) => l + PER_PAGE)}
-            >
-              load more →
-            </button>
-          </div>
-        ) : null}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onChange={(next) => {
+            setPage(next);
+            // Smooth scroll up so the user doesn't end up looking at the pagination after clicking
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
       </section>
 
       {/* Frame modal */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)}>
+      <Modal open={!!viewing} onClose={() => setViewing(null)} width="max-w-3xl">
         {viewing ? (
-          <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-moss-700)] bg-[var(--color-ink-850)]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl.annotated(viewing.id)}
-              alt={viewing.species_name ?? "frame"}
-              className="block max-h-[78vh] w-full object-contain bg-black"
-            />
-            <div className="flex flex-wrap items-baseline justify-between gap-3 px-5 py-4">
-              <div>
-                <h3 className="display-italic text-[1.4rem] text-[var(--color-cream-50)]">
-                  {viewing.corrected_species_name ?? viewing.species_name ?? "Unknown"}
-                </h3>
-                <div className="mt-1 text-[0.78rem] text-[var(--color-sage-200)]">
-                  {localTime(viewing.timestamp)} · #{viewing.id} ·{" "}
-                  {viewing.detection_model ?? "—"}{" "}
-                  {viewing.classifier_model ? `→ ${viewing.classifier_model}` : ""}
-                </div>
+          <div className="flex flex-col items-center gap-5">
+            <div className="relative w-full">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -inset-4 rounded-[28px] bg-gradient-to-br from-[rgba(224,169,109,0.14)] via-transparent to-[rgba(127,169,122,0.08)] blur-2xl"
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl.annotated(viewing.id)}
+                alt={viewing.species_name ?? "frame"}
+                className="relative mx-auto block max-h-[58vh] w-auto max-w-full rounded-[var(--radius-card)] border border-[var(--color-moss-700)] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)]"
+              />
+            </div>
+            <div className="glass w-full max-w-md rounded-[var(--radius-card)] px-5 py-4 text-center">
+              <h3 className="display-italic text-[1.4rem] leading-tight text-[var(--color-cream-50)] sm:text-[1.6rem]">
+                {viewing.corrected_species_name ?? viewing.species_name ?? "Unknown"}
+              </h3>
+              <div className="mt-1.5 text-[0.78rem] text-[var(--color-sage-200)]">
+                {localTime(viewing.timestamp)} · #{viewing.id}
+                {viewing.detection_model ? ` · ${viewing.detection_model}` : ""}
+                {viewing.classifier_model ? ` → ${viewing.classifier_model}` : ""}
               </div>
-              <span className="font-mono text-[var(--color-ember-400)]">
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
                 {formatPct(viewing.confidence)}
-              </span>
+              </div>
             </div>
           </div>
         ) : null}

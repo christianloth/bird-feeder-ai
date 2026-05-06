@@ -6,6 +6,15 @@ import type {
   Weather,
 } from "./types";
 
+function buildQuery(params: Record<string, string | number | undefined | null>): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === "" || v === null) continue;
+    qs.set(k, String(v));
+  }
+  return qs.toString();
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -30,12 +39,14 @@ export const api = {
   weather: () => jsonFetch<Weather>("/api/weather/current"),
 
   detections: (params: Record<string, string | number | undefined>) => {
-    const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(params)) {
-      if (v === undefined || v === "" || v === null) continue;
-      qs.set(k, String(v));
-    }
+    const qs = buildQuery(params);
     return jsonFetch<Detection[]>(`/api/detections?${qs}`);
+  },
+
+  detectionsCount: async (params: Record<string, string | number | undefined>) => {
+    const qs = buildQuery(params);
+    const res = await jsonFetch<{ count: number }>(`/api/detections/count?${qs}`);
+    return res.count;
   },
 
   nextPending: () =>
