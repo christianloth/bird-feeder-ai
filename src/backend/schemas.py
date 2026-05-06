@@ -59,6 +59,24 @@ class DetectionReview(BaseModel):
     corrected_species_id: int | None = None  # Set if the species was misidentified
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: int
+    not_found: list[int] = Field(default_factory=list)
+
+
+class IgnoreRegionResponse(BaseModel):
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    label: str
+    overlap_threshold: float
+
+
 class DetectionStats(BaseModel):
     total_detections: int
     unique_species: int

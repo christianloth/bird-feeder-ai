@@ -64,4 +64,27 @@ export interface DetectionsQuery {
   reviewed?: ReviewFilter;
   skip?: number;
   limit?: number;
+  region_x1?: number;
+  region_y1?: number;
+  region_x2?: number;
+  region_y2?: number;
+  region_overlap?: number;
+}
+
+export interface IgnoreRegion {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  label: string;
+  overlap_threshold: number;
+}
+
+export interface FeatureFlags {
+  sweep: boolean;
+}
+
+export interface BulkDeleteResponse {
+  deleted: number;
+  not_found: number[];
 }

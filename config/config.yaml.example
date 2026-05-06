@@ -81,6 +81,11 @@ location:
   longitude: -96.8236
   timezone: "America/Chicago"
 
+# --- Features ---
+# Toggle individual UI tabs / experimental features without rebuilding.
+features:
+  sweep: true   # /sweep page — bulk-delete detections inside ignore regions
+
 # --- Storage ---
 storage:
   save_crops: true

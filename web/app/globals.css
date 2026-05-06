@@ -370,6 +370,125 @@ details > summary::-webkit-details-marker { display: none; }
   }
 }
 
+/* Sweep page — region picker pills */
+.region-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(20, 26, 22, 0.55);
+  border: 1px solid var(--color-moss-700);
+  color: var(--color-sage-100);
+  transition: color 180ms ease, background 200ms ease, border-color 200ms ease,
+    box-shadow 240ms ease, transform 200ms ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.region-pill:hover {
+  color: var(--color-cream-50);
+  border-color: color-mix(in oklab, var(--color-ember-500) 50%, var(--color-moss-500));
+  transform: translateY(-1px);
+}
+.region-pill[data-active="true"] {
+  color: var(--color-cream-50);
+  background: linear-gradient(180deg, rgba(244, 207, 138, 0.14), rgba(176, 119, 68, 0.06));
+  border-color: color-mix(in oklab, var(--color-ember-500) 65%, transparent);
+  box-shadow: 0 0 0 1px rgba(244, 207, 138, 0.18),
+    0 12px 30px -16px rgba(244, 207, 138, 0.4);
+}
+
+/* Sweep page — contact-sheet card */
+.sweep-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--color-ink-850);
+  border: 1px solid var(--color-moss-700);
+  transition: border-color 200ms ease, box-shadow 240ms ease, transform 220ms ease;
+}
+.sweep-card[data-selected="true"] {
+  border-color: var(--color-ember-400);
+  box-shadow: 0 0 0 1px rgba(244, 207, 138, 0.25),
+    0 14px 36px -16px rgba(244, 207, 138, 0.45);
+}
+@media (hover: hover) {
+  .sweep-card:hover { transform: translateY(-2px); }
+}
+.sweep-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1.5px solid var(--color-moss-500);
+  background: rgba(7, 9, 10, 0.55);
+  color: var(--color-ink-900);
+  backdrop-filter: blur(4px);
+  transition: background 220ms ease, border-color 220ms ease, color 200ms ease,
+    transform 200ms ease;
+}
+.sweep-check[data-selected="true"] {
+  background: var(--color-ember-400);
+  border-color: var(--color-ember-400);
+  color: var(--color-ink-900);
+  transform: scale(1.06);
+}
+
+/* Sweep page — discard buttons */
+.discard-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-cream-50);
+  background: linear-gradient(180deg, rgba(201, 122, 92, 0.85), rgba(180, 92, 63, 0.95));
+  border: 1px solid color-mix(in oklab, var(--color-rust-500) 70%, var(--color-rust-600));
+  transition: transform 200ms ease, box-shadow 280ms ease, background 220ms ease;
+  cursor: pointer;
+}
+.discard-btn:hover {
+  background: linear-gradient(180deg, rgba(201, 122, 92, 1), rgba(180, 92, 63, 1));
+  box-shadow: 0 0 0 1px rgba(201, 122, 92, 0.3),
+    0 14px 32px -14px rgba(180, 92, 63, 0.55);
+  transform: translateY(-1px);
+}
+.discard-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+.discard-btn--ghost {
+  color: var(--color-rust-500);
+  background: transparent;
+  border-color: color-mix(in oklab, var(--color-rust-500) 50%, transparent);
+}
+.discard-btn--ghost:hover {
+  color: var(--color-cream-50);
+  background: linear-gradient(180deg, rgba(201, 122, 92, 0.85), rgba(180, 92, 63, 0.95));
+  border-color: var(--color-rust-500);
+}
+
+/* Floating action bar at the bottom of /sweep when selections exist */
+.sweep-action-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  transform: translateX(-50%);
+  z-index: 40;
+  pointer-events: auto;
+}
+
 /* Pagination */
 .page-btn {
   display: inline-flex;

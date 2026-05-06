@@ -31,6 +31,7 @@ _day_night = _cfg.get("day_night", {})
 _pipeline = _cfg.get("pipeline", {})
 _location = _cfg.get("location", {})
 _storage = _cfg.get("storage", {})
+_features = _cfg.get("features", {})
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,9 @@ class Settings:
     latitude: float = _location.get("latitude", 33.1507)
     longitude: float = _location.get("longitude", -96.8236)
     timezone: str = _location.get("timezone", "America/Chicago")
+
+    # Feature toggles (consumed by the API and frontend)
+    enable_sweep: bool = bool(_features.get("sweep", True))
 
     # Image storage
     save_crops: bool = _storage.get("save_crops", True)

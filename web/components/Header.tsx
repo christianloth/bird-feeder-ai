@@ -3,12 +3,21 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LogoMark, GrafanaIcon, HomeIcon, ReviewIcon } from "./Logo";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { LogoMark, GrafanaIcon, HomeIcon, ReviewIcon, SweepIcon } from "./Logo";
 
 export function Header() {
   const pathname = usePathname() ?? "/dashboard";
   const isDashboard = pathname.startsWith("/dashboard") || pathname === "/";
   const isReview = pathname.startsWith("/review");
+  const isSweep = pathname.startsWith("/sweep");
+  const features = useQuery({
+    queryKey: ["features"],
+    queryFn: api.features,
+    staleTime: 60_000,
+  });
+  const sweepEnabled = features.data?.sweep ?? false;
   const [now, setNow] = useState<string>("");
 
   useEffect(() => {
@@ -65,6 +74,17 @@ export function Header() {
             <ReviewIcon size={18} />
             <span className="hidden sm:inline">Review</span>
           </Link>
+          {sweepEnabled ? (
+            <Link
+              href="/sweep"
+              data-active={isSweep}
+              aria-label="Sweep"
+              className="nav-btn"
+            >
+              <SweepIcon size={18} />
+              <span className="hidden sm:inline">Sweep</span>
+            </Link>
+          ) : null}
           <a
             href="/grafana"
             title="Open Grafana analytics"

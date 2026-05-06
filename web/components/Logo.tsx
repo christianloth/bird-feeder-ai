@@ -72,6 +72,28 @@ export function HomeIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+export function SweepIcon({ size = 18 }: { size?: number }) {
+  // Region rectangle with a diagonal sweep-line cutting across it.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3.5" y="5" width="17" height="11" rx="1.5" />
+      <path d="M6 19l4-3" opacity="0.85" />
+      <path d="M11 19l4-3" opacity="0.6" />
+      <path d="M16 19l3-2.5" opacity="0.4" />
+    </svg>
+  );
+}
+
 export function ReviewIcon({ size = 18 }: { size?: number }) {
   return (
     <svg

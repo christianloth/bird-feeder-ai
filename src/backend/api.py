@@ -32,14 +32,18 @@ from src.backend.database import (
     migrate_species_category,
 )
 from src.backend.schemas import (
+    BulkDeleteRequest,
+    BulkDeleteResponse,
     DetectionResponse,
     DetectionReview,
     DetectionStats,
+    IgnoreRegionResponse,
     SpeciesResponse,
     WeatherResponse,
     DailySummaryResponse,
     SystemStatus,
 )
+from config.settings import settings
 from src.backend.weather import WeatherService, describe_weather_code
 from src.backend.weather_ingest import run_periodic_ingest, sync_weather
 from src.backend.storage import ImageStorage
@@ -138,6 +142,8 @@ def _apply_detection_filters(
     until: datetime | None,
     min_confidence: float | None,
     reviewed: ReviewStatus | None,
+    region: tuple[int, int, int, int] | None = None,
+    region_overlap: float = 0.5,
 ):
     if species_id is not None:
         query = query.filter(Detection.species_id == species_id)
@@ -155,7 +161,59 @@ def _apply_detection_filters(
         )
     elif reviewed == "false_positive":
         query = query.filter(Detection.is_false_positive.is_(True))
+
+    if region is not None:
+        rx1, ry1, rx2, ry2 = region
+        # Intersection over detection-area (matches the pipeline's filter rule).
+        # Use SQL CASE expressions for max(a,b)/min(a,b) — portable across SQLite.
+        from sqlalchemy import case
+        ix2 = case((Detection.bbox_x2 < rx2, Detection.bbox_x2), else_=rx2)
+        ix1 = case((Detection.bbox_x1 > rx1, Detection.bbox_x1), else_=rx1)
+        iy2 = case((Detection.bbox_y2 < ry2, Detection.bbox_y2), else_=ry2)
+        iy1 = case((Detection.bbox_y1 > ry1, Detection.bbox_y1), else_=ry1)
+        iw = ix2 - ix1
+        ih = iy2 - iy1
+        det_w = Detection.bbox_x2 - Detection.bbox_x1
+        det_h = Detection.bbox_y2 - Detection.bbox_y1
+        # Cheap AABB pre-filter so the big query stays index-friendly,
+        # then exact overlap check over the candidates.
+        query = query.filter(
+            Detection.bbox_x1.isnot(None),
+            Detection.bbox_x2 > rx1,
+            Detection.bbox_x1 < rx2,
+            Detection.bbox_y2 > ry1,
+            Detection.bbox_y1 < ry2,
+            iw > 0,
+            ih > 0,
+            det_w > 0,
+            det_h > 0,
+            (iw * ih) >= (det_w * det_h * region_overlap),
+        )
     return query
+
+
+def _parse_region(
+    region_x1: int | None,
+    region_y1: int | None,
+    region_x2: int | None,
+    region_y2: int | None,
+) -> tuple[int, int, int, int] | None:
+    """Validate region params: all four required together, or none."""
+    parts = (region_x1, region_y1, region_x2, region_y2)
+    given = [p is not None for p in parts]
+    if not any(given):
+        return None
+    if not all(given):
+        raise HTTPException(
+            status_code=400,
+            detail="region_x1, region_y1, region_x2, region_y2 must all be provided together",
+        )
+    rx1, ry1, rx2, ry2 = parts
+    if rx2 <= rx1 or ry2 <= ry1:
+        raise HTTPException(
+            status_code=400, detail="Region must satisfy x2 > x1 and y2 > y1",
+        )
+    return (rx1, ry1, rx2, ry2)
 
 
 @app.get("/api/detections", response_model=list[DetectionResponse])
@@ -168,8 +226,14 @@ def list_detections(
     until: datetime | None = None,
     min_confidence: float | None = None,
     reviewed: ReviewStatus | None = None,
+    region_x1: int | None = None,
+    region_y1: int | None = None,
+    region_x2: int | None = None,
+    region_y2: int | None = None,
+    region_overlap: Annotated[float, Query(ge=0.0, le=1.0)] = 0.5,
 ):
     """List detections with optional filtering."""
+    region = _parse_region(region_x1, region_y1, region_x2, region_y2)
     query = session.query(Detection).join(Detection.species, isouter=True)
     query = _apply_detection_filters(
         query,
@@ -178,6 +242,8 @@ def list_detections(
         until=until,
         min_confidence=min_confidence,
         reviewed=reviewed,
+        region=region,
+        region_overlap=region_overlap,
     )
 
     detections = query.order_by(desc(Detection.timestamp)).offset(skip).limit(limit).all()
@@ -199,8 +265,14 @@ def count_detections(
     until: datetime | None = None,
     min_confidence: float | None = None,
     reviewed: ReviewStatus | None = None,
+    region_x1: int | None = None,
+    region_y1: int | None = None,
+    region_x2: int | None = None,
+    region_y2: int | None = None,
+    region_overlap: Annotated[float, Query(ge=0.0, le=1.0)] = 0.5,
 ):
     """Return the total count of detections matching the same filters as /api/detections."""
+    region = _parse_region(region_x1, region_y1, region_x2, region_y2)
     query = _apply_detection_filters(
         session.query(func.count(Detection.id)),
         species_id=species_id,
@@ -208,6 +280,8 @@ def count_detections(
         until=until,
         min_confidence=min_confidence,
         reviewed=reviewed,
+        region=region,
+        region_overlap=region_overlap,
     )
     return {"count": query.scalar() or 0}
 
@@ -537,7 +611,74 @@ def get_annotated_frame(detection_id: int, session: SessionDep):
     return Response(content=buf.read(), media_type="image/jpeg")
 
 
+# --- Features & Ignore Regions ---
+
+
+@app.get("/api/features")
+def get_features():
+    """Feature toggles read from config/config.yaml."""
+    return {"sweep": settings.enable_sweep}
+
+
+@app.get("/api/ignore-regions", response_model=list[IgnoreRegionResponse])
+def list_ignore_regions():
+    """List the YOLO-detection ignore regions configured for the pipeline."""
+    threshold = settings.ignore_overlap_threshold
+    return [
+        IgnoreRegionResponse(
+            x1=r[0], y1=r[1], x2=r[2], y2=r[3],
+            label=f"({r[0]}, {r[1]}) → ({r[2]}, {r[3]})",
+            overlap_threshold=threshold,
+        )
+        for r in settings.ignore_regions
+    ]
+
+
 # --- Delete Detection ---
+
+
+@app.post("/api/detections/bulk-delete", response_model=BulkDeleteResponse)
+def bulk_delete_detections(body: BulkDeleteRequest, session: SessionDep):
+    """Delete many detections in one call. Removes both the DB rows and image files."""
+    if not body.ids:
+        return BulkDeleteResponse(deleted=0, not_found=[])
+
+    detections = (
+        session.query(Detection).filter(Detection.id.in_(body.ids)).all()
+    )
+    found_ids = {d.id for d in detections}
+    not_found = [i for i in body.ids if i not in found_ids]
+
+    deleted = 0
+    parents_to_check: set[_Path] = set()
+    for d in detections:
+        if d.frame_path:
+            frame_path = _image_storage.get_absolute_path(d.frame_path)
+            if frame_path.exists():
+                try:
+                    frame_path.unlink()
+                    parents_to_check.add(frame_path.parent)
+                except OSError as e:
+                    logger.warning(f"Failed to remove image for #{d.id}: {e}")
+        session.delete(d)
+        deleted += 1
+    session.commit()
+
+    # Best-effort cleanup of empty parent directories.
+    for parent in parents_to_check:
+        cur = parent
+        while cur != _image_storage.base_dir and cur.is_dir():
+            try:
+                if not any(cur.iterdir()):
+                    cur.rmdir()
+                    cur = cur.parent
+                else:
+                    break
+            except OSError:
+                break
+
+    logger.info(f"Bulk-deleted {deleted} detections (requested {len(body.ids)})")
+    return BulkDeleteResponse(deleted=deleted, not_found=not_found)
 
 
 @app.delete("/api/detections/{detection_id}")
