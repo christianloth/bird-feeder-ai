@@ -138,7 +138,7 @@ export default function ReviewPage() {
           />
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 text-[0.7rem] text-[var(--color-sage-200)] sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+        <div className="mt-4 hidden flex-wrap items-center gap-3 text-[0.7rem] text-[var(--color-sage-200)] sm:flex">
           <Shortcut keyLabel="A" desc="confirm" />
           <Shortcut keyLabel="X" desc="false positive" />
           <Shortcut keyLabel="C" desc="correct species" />

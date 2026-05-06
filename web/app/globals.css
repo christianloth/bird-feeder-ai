@@ -267,12 +267,17 @@ body::after {
   background: rgba(7, 9, 10, 0.55);
   border: 1px solid var(--color-moss-700);
   color: var(--color-cream-100);
-  padding: 0.55rem 0.8rem;
+  height: 38px;
+  min-height: 0;
+  padding: 0 0.8rem;
   border-radius: 10px;
   font-size: 0.86rem;
   font-family: var(--font-sans);
+  line-height: 1.2;
   transition: border-color 180ms ease, box-shadow 200ms ease, background 200ms ease;
   width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
 }
 .input-quiet:focus {
   outline: none;
@@ -282,17 +287,152 @@ body::after {
 }
 .input-quiet::placeholder { color: var(--color-moss-300); }
 
-/* Card hover halo */
+/* Restore the dropdown chevron on selects (appearance: none stripped it) */
+select.input-quiet {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238c9a8f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 12px;
+  padding-right: 2rem;
+}
+
+/* iOS native calendar/clock picker icons — tint to match the palette */
+input[type="date"].input-quiet::-webkit-calendar-picker-indicator,
+input[type="time"].input-quiet::-webkit-calendar-picker-indicator {
+  filter: invert(0.85) sepia(0.2) hue-rotate(20deg) saturate(0.6);
+  cursor: pointer;
+}
+/* Force iOS to render date values left-aligned at our height */
+input[type="date"].input-quiet::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 0;
+}
+
+/* Card hover halo (touch devices get tap feedback instead) */
 .tilt-card {
   transition: transform 350ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 350ms ease, border-color 250ms ease;
   will-change: transform;
 }
-.tilt-card:hover {
-  transform: translateY(-3px) scale(1.005);
-  border-color: color-mix(in oklab, var(--color-ember-500) 50%, var(--color-moss-700));
-  box-shadow: var(--shadow-glow);
+@media (hover: hover) {
+  .tilt-card:hover {
+    transform: translateY(-3px) scale(1.005);
+    border-color: color-mix(in oklab, var(--color-ember-500) 50%, var(--color-moss-700));
+    box-shadow: var(--shadow-glow);
+  }
+}
+@media (hover: none) {
+  .tilt-card:active {
+    transform: scale(0.985);
+    border-color: color-mix(in oklab, var(--color-ember-500) 35%, var(--color-moss-700));
+    transition: transform 120ms ease, border-color 120ms ease;
+  }
 }
 
 /* Range / details styled */
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
+
+/* Modal close button — fixed top-right of viewport, respects iOS notch */
+.modal-close {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.85rem);
+  right: calc(env(safe-area-inset-right, 0px) + 0.85rem);
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  color: var(--color-cream-50);
+  background: rgba(7, 9, 10, 0.72);
+  border: 1px solid var(--color-moss-700);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  transition: color 200ms ease, background 220ms ease,
+    border-color 200ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  cursor: pointer;
+}
+.modal-close:hover,
+.modal-close:focus-visible {
+  color: var(--color-ember-400);
+  border-color: var(--color-ember-400);
+  background: rgba(7, 9, 10, 0.92);
+  transform: rotate(90deg);
+  outline: none;
+}
+
+/* Mobile touch targets — 44px minimum on phones */
+@media (max-width: 639px) {
+  .btn-quiet,
+  .btn-ember {
+    min-height: 44px;
+  }
+}
+
+/* Pagination */
+.page-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 0.55rem;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--color-sage-100);
+  background: rgba(20, 26, 22, 0.5);
+  border: 1px solid var(--color-moss-700);
+  transition: color 180ms ease, background 200ms ease, border-color 200ms ease,
+    box-shadow 240ms ease, transform 180ms ease;
+  cursor: pointer;
+}
+.page-btn:hover:not(:disabled) {
+  color: var(--color-cream-50);
+  border-color: color-mix(in oklab, var(--color-ember-500) 50%, var(--color-moss-500));
+  background: rgba(224, 169, 109, 0.06);
+  transform: translateY(-1px);
+}
+.page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.page-btn[data-active="true"] {
+  color: var(--color-ink-900);
+  background: linear-gradient(180deg, var(--color-ember-400), var(--color-ember-500));
+  border-color: var(--color-ember-500);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(244, 207, 138, 0.15),
+    0 8px 22px -10px rgba(244, 207, 138, 0.55);
+}
+.page-btn[data-active="true"]:hover {
+  transform: none;
+}
+.page-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-ember-400);
+  box-shadow: 0 0 0 3px rgba(224, 169, 109, 0.28);
+}
+.page-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 36px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--color-moss-300);
+  letter-spacing: 0.1em;
+  user-select: none;
+}
+@media (min-width: 640px) {
+  .page-btn {
+    height: 38px;
+    min-width: 38px;
+    padding: 0 0.7rem;
+    font-size: 0.82rem;
+  }
+  .page-gap { height: 38px; }
+}

@@ -37,7 +37,7 @@ export function Header() {
             <LogoMark size={22} />
           </span>
           <span className="min-w-0 leading-tight">
-            <span className="block whitespace-nowrap font-display text-[1.2rem] italic tracking-tight text-[var(--color-cream-50)] sm:text-[1.35rem]">
+            <span className="block whitespace-nowrap font-display italic tracking-tight text-[clamp(1.05rem,4vw,1.35rem)] text-[var(--color-cream-50)]">
               Feeder Cam
             </span>
             <span className="eyebrow hidden truncate sm:block">
@@ -87,8 +87,8 @@ export function Header() {
         <span className="eyebrow ml-auto hidden truncate opacity-70 md:block">
           two-stage pipeline · YOLO11n → ViT-S · Hailo-10H NPU
         </span>
-        <span className="eyebrow ml-auto truncate opacity-60 sm:hidden">
-          Frisco · TX · 32.78°N 96.83°W
+        <span className="eyebrow ml-auto whitespace-nowrap opacity-60 sm:hidden">
+          Frisco · TX
         </span>
       </div>
     </header>

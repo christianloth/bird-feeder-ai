@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from io import BytesIO
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pathlib import Path as _Path
 
@@ -127,6 +127,37 @@ def health_check():
 # --- Detections ---
 
 
+ReviewStatus = Literal["pending", "reviewed", "false_positive"]
+
+
+def _apply_detection_filters(
+    query,
+    *,
+    species_id: int | None,
+    since: datetime | None,
+    until: datetime | None,
+    min_confidence: float | None,
+    reviewed: ReviewStatus | None,
+):
+    if species_id is not None:
+        query = query.filter(Detection.species_id == species_id)
+    if since is not None:
+        query = query.filter(Detection.timestamp >= since)
+    if until is not None:
+        query = query.filter(Detection.timestamp <= until)
+    if min_confidence is not None:
+        query = query.filter(Detection.confidence >= min_confidence)
+    if reviewed == "pending":
+        query = query.filter(Detection.reviewed.is_(False))
+    elif reviewed == "reviewed":
+        query = query.filter(
+            Detection.reviewed.is_(True), Detection.is_false_positive.is_(False)
+        )
+    elif reviewed == "false_positive":
+        query = query.filter(Detection.is_false_positive.is_(True))
+    return query
+
+
 @app.get("/api/detections", response_model=list[DetectionResponse])
 def list_detections(
     session: SessionDep,
@@ -136,18 +167,18 @@ def list_detections(
     since: datetime | None = None,
     until: datetime | None = None,
     min_confidence: float | None = None,
+    reviewed: ReviewStatus | None = None,
 ):
     """List detections with optional filtering."""
     query = session.query(Detection).join(Detection.species, isouter=True)
-
-    if species_id is not None:
-        query = query.filter(Detection.species_id == species_id)
-    if since is not None:
-        query = query.filter(Detection.timestamp >= since)
-    if until is not None:
-        query = query.filter(Detection.timestamp <= until)
-    if min_confidence is not None:
-        query = query.filter(Detection.confidence >= min_confidence)
+    query = _apply_detection_filters(
+        query,
+        species_id=species_id,
+        since=since,
+        until=until,
+        min_confidence=min_confidence,
+        reviewed=reviewed,
+    )
 
     detections = query.order_by(desc(Detection.timestamp)).offset(skip).limit(limit).all()
 
@@ -158,6 +189,27 @@ def list_detections(
         results.append(resp)
 
     return results
+
+
+@app.get("/api/detections/count")
+def count_detections(
+    session: SessionDep,
+    species_id: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    min_confidence: float | None = None,
+    reviewed: ReviewStatus | None = None,
+):
+    """Return the total count of detections matching the same filters as /api/detections."""
+    query = _apply_detection_filters(
+        session.query(func.count(Detection.id)),
+        species_id=species_id,
+        since=since,
+        until=until,
+        min_confidence=min_confidence,
+        reviewed=reviewed,
+    )
+    return {"count": query.scalar() or 0}
 
 
 @app.get("/api/detections/{detection_id}", response_model=DetectionResponse)

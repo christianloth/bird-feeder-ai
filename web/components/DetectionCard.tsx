@@ -82,7 +82,10 @@ export function DetectionCard({ detection, onView, onDelete, index }: Props) {
 
       <div className="flex flex-col gap-2 p-4">
         <div className="flex items-baseline justify-between gap-3">
-          <h3 className="display-italic line-clamp-1 text-[1.2rem] leading-tight text-[var(--color-cream-50)]">
+          <h3
+            className="display-italic line-clamp-1 text-[1.2rem] leading-tight text-[var(--color-cream-50)]"
+            title={speciesName}
+          >
             {speciesName}
           </h3>
           <span className="eyebrow shrink-0" title={localTime(detection.timestamp)}>
