@@ -6,8 +6,19 @@ export function formatPct(n: number, fractionDigits = 1): string {
   return `${(n * 100).toFixed(fractionDigits)}%`;
 }
 
+/**
+ * The API returns ISO timestamps without a timezone suffix, but the values
+ * are stored as UTC in the database. Without a suffix, `new Date(iso)` would
+ * interpret the string as local time, which puts every detection several
+ * hours into the future for users west of UTC.
+ */
+function parseUtcISO(iso: string): Date {
+  const hasTz = /[Z]|[+-]\d{2}:?\d{2}$/.test(iso);
+  return new Date(hasTz ? iso : `${iso}Z`);
+}
+
 export function timeAgo(iso: string): string {
-  const date = new Date(iso);
+  const date = parseUtcISO(iso);
   const now = Date.now();
   const diff = (now - date.getTime()) / 1000;
   if (diff < 60) return "just now";
@@ -18,7 +29,7 @@ export function timeAgo(iso: string): string {
 }
 
 export function localTime(iso: string): string {
-  const date = new Date(iso);
+  const date = parseUtcISO(iso);
   return date.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
