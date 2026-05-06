@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, imageUrl } from "@/lib/api";
@@ -33,7 +33,11 @@ function DashboardInner() {
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [searchParams]);
 
-  const setViewingId = (id: number | null) => {
+  // URL is a best-effort deep link, not the source of truth for "is the
+  // modal open." Some webviews (Telegram's iOS in-app browser in particular)
+  // don't propagate History API updates back to useSearchParams, so we have
+  // to drive the modal from local state and update the URL on the side.
+  const syncUrl = (id: number | null) => {
     const sp = new URLSearchParams(searchParams.toString());
     if (id === null) sp.delete("d");
     else sp.set("d", String(id));
@@ -46,6 +50,11 @@ function DashboardInner() {
   const [filters, setFilters] = useState<FilterValues>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<Detection | null>(null);
+  const [viewing, setViewing] = useState<Detection | null>(null);
+  // Tracks ids the user has explicitly dismissed so a later data refetch
+  // (or a stuck URL in webviews) can't re-open the modal via the URL→state
+  // effect below. Held in a ref so mutating it doesn't trigger renders.
+  const dismissedIdsRef = useRef<Set<number>>(new Set());
   const qc = useQueryClient();
 
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
@@ -97,25 +106,51 @@ function DashboardInner() {
       qc.invalidateQueries({ queryKey: ["detections-count"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       setPendingDelete(null);
-      if (viewingId === deletedId) setViewingId(null);
+      if (viewing?.id === deletedId) closeViewer();
     },
   });
 
   const detections = detectionsQ.data ?? [];
   const speciesList = speciesQ.data ?? [];
 
-  // Fall back to a single-detection fetch when the deep-linked id isn't on the
-  // current page (e.g. a shared link to an older detection).
+  // Fall back to a single-detection fetch when the deep-linked id isn't on
+  // the current page (e.g. a shared link to an older detection).
   const singleQ = useQuery({
     queryKey: ["detection", viewingId],
     queryFn: () => api.detection(viewingId!),
     enabled: viewingId !== null && !detections.some((d) => d.id === viewingId),
   });
 
-  const viewing = useMemo<Detection | null>(() => {
-    if (viewingId === null) return null;
-    return detections.find((d) => d.id === viewingId) ?? singleQ.data ?? null;
+  // URL → state. Runs on initial deep link, browser back/forward, and any
+  // detections / singleQ.data refetch. Skips ids the user has explicitly
+  // dismissed so a stale URL (Telegram in-app browser swallows History API
+  // updates) can't re-open the modal after a refetch.
+  useEffect(() => {
+    if (viewingId === null) {
+      setViewing(null);
+      return;
+    }
+    if (dismissedIdsRef.current.has(viewingId)) return;
+    const found =
+      detections.find((d) => d.id === viewingId) ?? singleQ.data ?? null;
+    if (found) setViewing(found);
   }, [viewingId, detections, singleQ.data]);
+
+  const openViewer = (d: Detection) => {
+    // Switching from another view: dismiss the prior id so a stuck URL
+    // can't pull it back through the effect above.
+    if (viewing && viewing.id !== d.id) {
+      dismissedIdsRef.current.add(viewing.id);
+    }
+    dismissedIdsRef.current.delete(d.id);
+    setViewing(d);
+    syncUrl(d.id);
+  };
+  const closeViewer = () => {
+    if (viewing) dismissedIdsRef.current.add(viewing.id);
+    setViewing(null);
+    syncUrl(null);
+  };
 
   return (
     <>
@@ -213,7 +248,7 @@ function DashboardInner() {
                 key={d.id}
                 detection={d}
                 index={i}
-                onView={(x) => setViewingId(x.id)}
+                onView={(x) => openViewer(x)}
                 onDelete={(x) => setPendingDelete(x)}
               />
             ))}
@@ -232,7 +267,7 @@ function DashboardInner() {
       </section>
 
       {/* Frame modal */}
-      <Modal open={!!viewing} onClose={() => setViewingId(null)} width="max-w-3xl">
+      <Modal open={!!viewing} onClose={closeViewer} width="max-w-3xl">
         {viewing ? (
           <div className="flex flex-col items-center gap-5">
             <div className="relative w-full">
