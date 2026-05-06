@@ -72,11 +72,10 @@ export default function DashboardPage() {
     <>
       {/* Hero */}
       <section className="rise mb-8 flex flex-col gap-3 pt-2">
-        <span className="eyebrow">Field log · entry no. {stats.data?.total_detections ?? "—"}</span>
         <h1 className="font-display text-[2.6rem] leading-[1.05] tracking-tight text-[var(--color-cream-50)] sm:text-[3.4rem]">
-          An evening<span className="text-[var(--color-ember-400)]">.</span>{" "}
+          An evening{" "}
           <span className="display-italic text-[var(--color-cream-100)]">
-            with the {firstWord(stats.data?.most_common_species)}
+            with the birds
           </span>
         </h1>
         <p className="max-w-[60ch] text-[0.95rem] leading-relaxed text-[var(--color-sage-100)]">
@@ -244,11 +243,6 @@ export default function DashboardPage() {
       </Modal>
     </>
   );
-}
-
-function firstWord(s: string | null | undefined) {
-  if (!s) return "birds";
-  return s.split(" ").slice(-1)[0]?.toLowerCase() || "birds";
 }
 
 function SkeletonGrid() {
