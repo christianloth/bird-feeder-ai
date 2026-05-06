@@ -25,7 +25,7 @@ cd "$ROOT_DIR"
 # setsid puts the python process in a new session (PGID == PID), so all
 # child processes (e.g., multiprocessing workers) can be killed as a group.
 setsid "$ROOT_DIR/.venv/bin/python" -m src.pipeline.pipeline \
-    --mode hailo --day --log-level DEBUG \
+    --mode hailo --day --log-level INFO \
     >>"$LOG_FILE" 2>&1 </dev/null &
 
 pid=$!
