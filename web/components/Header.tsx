@@ -49,7 +49,7 @@ export function Header() {
             <span className="block whitespace-nowrap font-display italic tracking-tight text-[clamp(1.05rem,4vw,1.35rem)] text-[var(--color-cream-50)]">
               Feeder Cam
             </span>
-            <span className="eyebrow hidden truncate sm:block">
+            <span className="eyebrow hidden whitespace-nowrap lg:block">
               Frisco · TX <span className="mx-2 opacity-40">/</span> 32.78°N 96.83°W
             </span>
           </span>
