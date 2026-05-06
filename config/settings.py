@@ -32,6 +32,41 @@ _pipeline = _cfg.get("pipeline", {})
 _location = _cfg.get("location", {})
 _storage = _cfg.get("storage", {})
 _features = _cfg.get("features", {})
+_notifications = _cfg.get("notifications", {})
+_telegram = _notifications.get("telegram", {})
+
+
+def _parse_watchlist(raw) -> dict[int, float]:
+    """Map nabirds_id → min_confidence from the YAML watchlist list."""
+    result: dict[int, float] = {}
+    if not isinstance(raw, list):
+        return result
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        nid = entry.get("nabirds_id")
+        thresh = entry.get("min_confidence")
+        if isinstance(nid, int) and isinstance(thresh, (int, float)):
+            result[int(nid)] = float(thresh)
+    return result
+
+
+@dataclass(frozen=True)
+class TelegramNotificationConfig:
+    enabled: bool = bool(_telegram.get("enabled", False))
+    # Optional inline bot token. If empty, the TELEGRAM_BOT_TOKEN env var is
+    # used instead. config.yaml is gitignored so either path is safe locally.
+    bot_token: str = str(_telegram.get("bot_token") or "")
+    chat_id: str = str(_telegram.get("chat_id") or "")
+    site_base_url: str = str(_telegram.get("site_base_url") or "").rstrip("/")
+    photo_kind: str = str(_telegram.get("photo_kind", "annotated"))
+    cooldown_seconds: int = int(_telegram.get("cooldown_seconds", 1800))
+    daily_cap: int = int(_telegram.get("daily_cap", 50))
+    quiet_hours_start: str | None = _telegram.get("quiet_hours_start") or None
+    quiet_hours_end: str | None = _telegram.get("quiet_hours_end") or None
+    watchlist: dict[int, float] = field(
+        default_factory=lambda: _parse_watchlist(_telegram.get("watchlist"))
+    )
 
 
 @dataclass(frozen=True)
@@ -111,6 +146,9 @@ class Settings:
 
     # Feature toggles (consumed by the API and frontend)
     enable_sweep: bool = bool(_features.get("sweep", True))
+
+    # Notifications (Telegram)
+    telegram: TelegramNotificationConfig = field(default_factory=TelegramNotificationConfig)
 
     # Image storage
     save_crops: bool = _storage.get("save_crops", True)

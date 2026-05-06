@@ -35,6 +35,7 @@ from src.inference.detector import BirdDetector, WildlifeDetector
 from src.inference.tracker import BirdTracker, crop_bird_roi
 from src.pipeline.camera import RTSPCamera, FrameSkipper
 from src.backend.weather import WeatherService
+from src.notifications import build_dispatcher, deep_link_for, photo_url_for
 from src.pipeline.mode_manager import DayNightManager
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,8 @@ class BirdPipeline:
         # Species cooldown: suppress duplicate DB saves of the same species
         # within N seconds. One bird visit = one database record.
         self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
+        # Optional Telegram notifier (None when disabled or token missing).
+        self._notifier = build_dispatcher()
 
     def _log_pipeline_config(self) -> None:
         """Log pipeline configuration at startup."""
@@ -178,6 +181,8 @@ class BirdPipeline:
             logger.error(f"Failed to save detection image for {species_name}: {e}")
             return
 
+        detection_id: int | None = None
+        nabirds_id: int | None = None
         try:
             with self._session_factory() as session:
                 species = session.query(Species).filter(
@@ -206,12 +211,28 @@ class BirdPipeline:
                 )
                 session.add(detection)
                 session.commit()
+                detection_id = detection.id
+                nabirds_id = species.nabirds_id if species else None
         except Exception as e:
             logger.error(f"Failed to save detection to database: {e}")
             return
 
         self._total_detections += 1
         logger.info(f"Detection #{self._total_detections}: {species_name} ({confidence:.2f})")
+
+        if self._notifier is not None and detection_id is not None:
+            kind = settings.telegram.photo_kind or "annotated"
+            photo_url = photo_url_for(detection_id, kind)
+            deep_link = deep_link_for(detection_id)
+            pct = int(round(confidence * 100))
+            caption = f"🐦 {species_name} {pct}%\n{deep_link}"
+            self._notifier.maybe_enqueue(
+                nabirds_id=nabirds_id,
+                confidence=confidence,
+                photo_url=photo_url,
+                caption=caption,
+                now=timestamp,
+            )
 
     def _filter_ignored_regions(
         self,
@@ -555,6 +576,8 @@ class BirdPipeline:
 
         finally:
             self.camera.stop()
+            if self._notifier is not None:
+                self._notifier.shutdown()
             logger.info(
                 f"Pipeline stopped. Processed {frames_processed} frames, "
                 f"{self._total_detections} detections total."

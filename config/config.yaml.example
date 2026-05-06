@@ -86,6 +86,31 @@ location:
 features:
   sweep: true   # /sweep page — bulk-delete detections inside ignore regions
 
+# --- Notifications ---
+# Push a Telegram message with the annotated photo + a deep link to the
+# detection page when a watched species is spotted. The bot token can be
+# inline below as `bot_token:` or via the TELEGRAM_BOT_TOKEN env var (.env).
+# This file is gitignored, so either is fine for a single-user setup.
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ""                            # From @BotFather (or use TELEGRAM_BOT_TOKEN env var)
+    chat_id: ""                              # Your Telegram chat ID (numeric, as a string)
+    site_base_url: "https://feedercam.loth.me"
+    photo_kind: "annotated"                  # annotated | crop | frame
+    cooldown_seconds: 1800                   # Per-species cooldown (30 min)
+    daily_cap: 50                            # Max notifications per local day
+    quiet_hours_start: null                  # e.g. "22:00" (local time) or null
+    quiet_hours_end: null                    # e.g. "07:00" (local time) or null
+    # Watched species. NABirds IDs from data/nabirds/classes.txt — same
+    # convention as disabled_species_ids above. min_confidence overrides the
+    # classifier's global threshold for notification purposes only.
+    watchlist: []
+    # Example:
+    # watchlist:
+    #   - { nabirds_id: 842, min_confidence: 0.80 }   # Eastern Bluebird
+    #   - { nabirds_id: 773, min_confidence: 0.75 }   # Rose-breasted Grosbeak (Adult Male)
+
 # --- Storage ---
 storage:
   save_crops: true

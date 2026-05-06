@@ -22,6 +22,14 @@ fi
 
 cd "$ROOT_DIR"
 
+# Load local secrets (e.g. TELEGRAM_BOT_TOKEN) into the environment.
+if [[ -f "$ROOT_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT_DIR/.env"
+    set +a
+fi
+
 # setsid puts the python process in a new session (PGID == PID), so all
 # child processes (e.g., multiprocessing workers) can be killed as a group.
 setsid "$ROOT_DIR/.venv/bin/python" -m src.pipeline.pipeline \
