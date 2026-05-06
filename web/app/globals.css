@@ -200,6 +200,58 @@ body::after {
   text-decoration: none;
   cursor: pointer;
 }
+
+/* Nav buttons: square 44×44 icon-only on mobile, pill with text on sm+ */
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  height: 44px;
+  min-width: 44px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-sage-100);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: color 180ms ease, background 180ms ease, border-color 180ms ease,
+    box-shadow 220ms ease, transform 200ms ease;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nav-btn:hover {
+  color: var(--color-cream-100);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--color-moss-700);
+}
+.nav-btn[data-active="true"] {
+  color: var(--color-cream-100);
+  border-color: color-mix(in oklab, var(--color-ember-500) 40%, transparent);
+  background: rgba(224, 169, 109, 0.06);
+}
+.nav-btn--ember {
+  color: var(--color-ember-300);
+  background: linear-gradient(180deg, rgba(224, 169, 109, 0.14), rgba(176, 119, 68, 0.06));
+  border-color: color-mix(in oklab, var(--color-ember-500) 55%, transparent);
+}
+.nav-btn--ember:hover {
+  color: var(--color-ember-400);
+  border-color: var(--color-ember-400);
+  box-shadow: 0 0 0 1px rgba(244, 207, 138, 0.15),
+    0 12px 30px -16px rgba(244, 207, 138, 0.45);
+  transform: translateY(-1px);
+}
+@media (min-width: 640px) {
+  .nav-btn {
+    height: 38px;
+    min-width: 0;
+    padding: 0 1rem;
+  }
+}
 .btn-quiet:hover {
   color: var(--color-cream-100);
   background: rgba(255, 255, 255, 0.03);
