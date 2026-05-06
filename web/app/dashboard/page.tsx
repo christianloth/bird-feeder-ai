@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, imageUrl } from "@/lib/api";
 import type { Detection } from "@/lib/types";
@@ -14,9 +15,36 @@ import { Pagination } from "@/components/Pagination";
 const PER_PAGE = 24;
 
 export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardInner />
+    </Suspense>
+  );
+}
+
+function DashboardInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const viewingId = useMemo<number | null>(() => {
+    const raw = searchParams.get("d");
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [searchParams]);
+
+  const setViewingId = (id: number | null) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (id === null) sp.delete("d");
+    else sp.set("d", String(id));
+    const qs = sp.toString();
+    const path = qs ? `/dashboard/?${qs}` : "/dashboard/";
+    if (id === null) router.replace(path, { scroll: false });
+    else router.push(path, { scroll: false });
+  };
+
   const [filters, setFilters] = useState<FilterValues>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
-  const [viewing, setViewing] = useState<Detection | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Detection | null>(null);
   const qc = useQueryClient();
 
@@ -64,16 +92,30 @@ export default function DashboardPage() {
 
   const del = useMutation({
     mutationFn: (id: number) => api.deleteDetection(id),
-    onSuccess: () => {
+    onSuccess: (_data, deletedId) => {
       qc.invalidateQueries({ queryKey: ["detections"] });
       qc.invalidateQueries({ queryKey: ["detections-count"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       setPendingDelete(null);
+      if (viewingId === deletedId) setViewingId(null);
     },
   });
 
   const detections = detectionsQ.data ?? [];
   const speciesList = speciesQ.data ?? [];
+
+  // Fall back to a single-detection fetch when the deep-linked id isn't on the
+  // current page (e.g. a shared link to an older detection).
+  const singleQ = useQuery({
+    queryKey: ["detection", viewingId],
+    queryFn: () => api.detection(viewingId!),
+    enabled: viewingId !== null && !detections.some((d) => d.id === viewingId),
+  });
+
+  const viewing = useMemo<Detection | null>(() => {
+    if (viewingId === null) return null;
+    return detections.find((d) => d.id === viewingId) ?? singleQ.data ?? null;
+  }, [viewingId, detections, singleQ.data]);
 
   return (
     <>
@@ -171,7 +213,7 @@ export default function DashboardPage() {
                 key={d.id}
                 detection={d}
                 index={i}
-                onView={(x) => setViewing(x)}
+                onView={(x) => setViewingId(x.id)}
                 onDelete={(x) => setPendingDelete(x)}
               />
             ))}
@@ -190,7 +232,7 @@ export default function DashboardPage() {
       </section>
 
       {/* Frame modal */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)} width="max-w-3xl">
+      <Modal open={!!viewing} onClose={() => setViewingId(null)} width="max-w-3xl">
         {viewing ? (
           <div className="flex flex-col items-center gap-5">
             <div className="relative w-full">
