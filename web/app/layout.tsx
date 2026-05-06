@@ -23,10 +23,25 @@ const mono = JetBrains_Mono({
   display: "swap",
 });
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://feedercam.loth.me";
+
 export const metadata: Metadata = {
-  title: "Bird Feeder · Field Notes",
+  metadataBase: new URL(siteUrl),
+  title: "Feeder Cam — An evening with the birds",
   description:
-    "A 24/7 bird-detection log running on a Raspberry Pi 5 with a Hailo-10H NPU, watching a feeder in Frisco, TX.",
+    "A feeder in Frisco, watched by a Pi. Every visitor logged with the time, the weather, and the model's best guess.",
+  openGraph: {
+    title: "Feeder Cam",
+    description: "An evening with the birds. A feeder in Frisco, watched 24/7 by a Pi.",
+    siteName: "Feeder Cam",
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Feeder Cam",
+    description: "An evening with the birds. A feeder in Frisco, watched 24/7 by a Pi.",
+  },
 };
 
 export default function RootLayout({

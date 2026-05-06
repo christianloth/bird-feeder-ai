@@ -753,6 +753,16 @@ def run_cleanup():
 # trailing-slash redirects for /dashboard, /review, etc.
 
 if _WEB_OUT.exists():
+    # Next.js writes the OG image as an extension-less file; StaticFiles guesses
+    # the mime as text/plain by default, which breaks scrapers. Serve it
+    # explicitly as PNG before falling through to the static mount.
+    @app.get("/opengraph-image")
+    def og_image():
+        path = _WEB_OUT / "opengraph-image"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="OG image not built")
+        return FileResponse(path, media_type="image/png")
+
     app.mount(
         "/",
         StaticFiles(directory=str(_WEB_OUT), html=True),
