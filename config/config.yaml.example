@@ -27,6 +27,16 @@ bird_detection:
   hef_model: "yolov11s.hef"   # HEF model filename in models/hef/ for Hailo NPU
   confidence_threshold: 0.4   # min confidence to consider a YOLO detection a bird
   bird_class_id: 14            # COCO class 14 = "bird"
+  # Pixel regions to ignore. Any detection whose bbox overlaps an ignore
+  # region by more than ignore_overlap_threshold (fraction of the detection's
+  # area) is dropped before classification. Useful for suppressing static
+  # fake birds / decoys at fixed pixel locations.
+  # Coordinates are [x1, y1, x2, y2] in the rotated frame.
+  ignore_regions: []
+  # Example:
+  # ignore_regions:
+  #   - [624, 0, 744, 100]
+  ignore_overlap_threshold: 0.5
 
 # --- Daytime: Species Classification (Stage 2) ---
 # ViT-Small classifier that takes the cropped bird from Stage 1

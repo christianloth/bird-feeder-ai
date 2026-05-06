@@ -213,6 +213,53 @@ class BirdPipeline:
         self._total_detections += 1
         logger.info(f"Detection #{self._total_detections}: {species_name} ({confidence:.2f})")
 
+    def _filter_ignored_regions(
+        self,
+        bboxes: list[tuple[int, int, int, int]],
+        confidences: list[float],
+    ) -> tuple[list[tuple[int, int, int, int]], list[float]]:
+        """Drop detections that overlap a configured ignore region.
+
+        A detection is dropped if (intersection_area / detection_area) is
+        >= settings.ignore_overlap_threshold for any ignore region. This
+        suppresses static fake birds / decoys while letting real birds that
+        merely clip the corner of the zone through.
+        """
+        regions = settings.ignore_regions
+        if not regions:
+            return bboxes, confidences
+
+        threshold = settings.ignore_overlap_threshold
+        kept_bboxes: list[tuple[int, int, int, int]] = []
+        kept_confs: list[float] = []
+        for bbox, conf in zip(bboxes, confidences):
+            x1, y1, x2, y2 = bbox
+            det_area = max(0, x2 - x1) * max(0, y2 - y1)
+            if det_area == 0:
+                kept_bboxes.append(bbox)
+                kept_confs.append(conf)
+                continue
+
+            suppressed = False
+            for rx1, ry1, rx2, ry2 in regions:
+                ix1 = max(x1, rx1)
+                iy1 = max(y1, ry1)
+                ix2 = min(x2, rx2)
+                iy2 = min(y2, ry2)
+                inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                if inter / det_area >= threshold:
+                    logger.info(
+                        f"Suppressed detection {bbox} (conf={conf:.2f}) — "
+                        f"{inter/det_area:.0%} inside ignore region "
+                        f"({rx1},{ry1},{rx2},{ry2})"
+                    )
+                    suppressed = True
+                    break
+            if not suppressed:
+                kept_bboxes.append(bbox)
+                kept_confs.append(conf)
+        return kept_bboxes, kept_confs
+
     def process_frame(self, frame: np.ndarray, timestamp: float | None = None) -> list[dict]:
         """
         Process a single frame through the full pipeline.
@@ -274,6 +321,8 @@ class BirdPipeline:
             logger.debug(f"Detection: {len(bboxes)} birds in {det_ms:.1f}ms (YOLO conf: [{confs_str}])")
         else:
             logger.debug(f"Detection: 0 birds in {det_ms:.1f}ms")
+
+        bboxes, confidences = self._filter_ignored_regions(bboxes, confidences)
 
         # 2. Update tracker — returns all active tracks not yet confidently
         #    classified (both new tracks and existing ones being retried)
@@ -366,6 +415,13 @@ class BirdPipeline:
         wildlife_dets = self.wildlife_detector.detect(frame)
         det_ms = (time.perf_counter() - t0) * 1000
         logger.debug(f"Wildlife detection: {len(wildlife_dets)} animals in {det_ms:.1f}ms")
+
+        if settings.ignore_regions:
+            bboxes_in = [d.bbox for d in wildlife_dets]
+            confs_in = [d.confidence for d in wildlife_dets]
+            kept_bboxes, _ = self._filter_ignored_regions(bboxes_in, confs_in)
+            kept_set = {tuple(b) for b in kept_bboxes}
+            wildlife_dets = [d for d in wildlife_dets if tuple(d.bbox) in kept_set]
 
         bboxes = [d.bbox for d in wildlife_dets]
         wildlife_confs = [d.confidence for d in wildlife_dets]

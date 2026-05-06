@@ -57,6 +57,16 @@ class Settings:
     detection_model_path: Path = field(default=None)  # Hailo HEF path
     detection_confidence_threshold: float = _bird_detection.get("confidence_threshold", 0.4)
     bird_class_id: int = _bird_detection.get("bird_class_id", 14)
+    # Pixel regions to ignore at the detection stage (e.g. static fake birds).
+    # Each region is (x1, y1, x2, y2) in the rotated frame.
+    ignore_regions: tuple[tuple[int, int, int, int], ...] = field(
+        default_factory=lambda: tuple(
+            tuple(int(v) for v in region)
+            for region in (_bird_detection.get("ignore_regions") or [])
+            if isinstance(region, (list, tuple)) and len(region) == 4
+        )
+    )
+    ignore_overlap_threshold: float = _bird_detection.get("ignore_overlap_threshold", 0.5)
 
     # Daytime: Species Classification (Stage 2 — ViT classifies species)
     classifier_hef: str = _species_classification.get("hef_model", "")
