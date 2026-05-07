@@ -55,6 +55,10 @@ function DashboardInner() {
   // (or a stuck URL in webviews) can't re-open the modal via the URL→state
   // effect below. Held in a ref so mutating it doesn't trigger renders.
   const dismissedIdsRef = useRef<Set<number>>(new Set());
+  // Tracks the last viewingId we synced from the URL. When the URL changes
+  // (e.g. user pastes a fresh link, or browser back), we clear dismissals
+  // so a previously-dismissed id can be deep-linked back into in this tab.
+  const lastViewingIdRef = useRef<number | null | undefined>(undefined);
   const qc = useQueryClient();
 
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
@@ -110,7 +114,12 @@ function DashboardInner() {
     },
   });
 
-  const detections = detectionsQ.data ?? [];
+  // Memoize so the deps array of the URL→state effect doesn't see a fresh
+  // `[]` reference on every render while data is loading.
+  const detections = useMemo<Detection[]>(
+    () => detectionsQ.data ?? [],
+    [detectionsQ.data]
+  );
   const speciesList = speciesQ.data ?? [];
 
   // Fall back to a single-detection fetch when the deep-linked id isn't on
@@ -124,8 +133,14 @@ function DashboardInner() {
   // URL → state. Runs on initial deep link, browser back/forward, and any
   // detections / singleQ.data refetch. Skips ids the user has explicitly
   // dismissed so a stale URL (Telegram in-app browser swallows History API
-  // updates) can't re-open the modal after a refetch.
+  // updates) can't re-open the modal after a refetch. URL transitions
+  // clear the dismissal set so a previously-closed id can be deep-linked
+  // back into within the same tab.
   useEffect(() => {
+    if (lastViewingIdRef.current !== viewingId) {
+      dismissedIdsRef.current.clear();
+      lastViewingIdRef.current = viewingId;
+    }
     if (viewingId === null) {
       setViewing(null);
       return;
