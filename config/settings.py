@@ -37,7 +37,11 @@ _telegram = _notifications.get("telegram") or {}
 
 
 def _parse_watchlist(raw) -> dict[int, float]:
-    """Map nabirds_id → min_confidence from the YAML watchlist list."""
+    """Map nabirds_id → min_confidence from the YAML watchlist list.
+
+    `min_confidence` is optional. When absent, the gate uses 0.0 — i.e. it
+    accepts whatever confidence the classifier emitted (the classifier's own
+    `species_classification.confidence_threshold` is the real floor)."""
     result: dict[int, float] = {}
     if not isinstance(raw, list):
         return result
@@ -45,9 +49,12 @@ def _parse_watchlist(raw) -> dict[int, float]:
         if not isinstance(entry, dict):
             continue
         nid = entry.get("nabirds_id")
-        thresh = entry.get("min_confidence")
-        if isinstance(nid, int) and isinstance(thresh, (int, float)):
-            result[int(nid)] = float(thresh)
+        if not isinstance(nid, int):
+            continue
+        thresh = entry.get("min_confidence", 0.0)
+        if not isinstance(thresh, (int, float)):
+            thresh = 0.0
+        result[int(nid)] = float(thresh)
     return result
 
 

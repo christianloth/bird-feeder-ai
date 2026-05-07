@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-import time
 from datetime import datetime
 
 from src.notifications.telegram import TelegramMessage, TelegramNotifier
@@ -45,13 +44,13 @@ class NotificationDispatcher:
         caption: str,
         now: datetime,
     ) -> bool:
-        """Gate the detection; if pass, record + enqueue. Returns True if enqueued."""
-        if not self._gate.should_notify(nabirds_id, confidence, now):
+        """Atomically gate + reserve + enqueue. Returns True iff enqueued.
+        On enqueue failure, releases the reservation so the slot/cooldown
+        isn't burned for a notification that never went out."""
+        if nabirds_id is None:
             return False
-        # Record before enqueue so a flurry of detections within the cooldown
-        # window can't queue multiple sends ahead of the worker.
-        assert nabirds_id is not None
-        self._gate.record_sent(nabirds_id, now)
+        if not self._gate.check_and_record(nabirds_id, confidence, now):
+            return False
         try:
             self._queue.put_nowait(TelegramMessage(
                 chat_id=self._gate.cfg.chat_id,
@@ -59,7 +58,11 @@ class NotificationDispatcher:
                 caption=caption,
             ))
         except queue.Full:
-            logger.warning("Telegram queue full; dropping notification")
+            logger.warning(
+                "Telegram queue full (size=%d); dropping notification for "
+                "nabirds_id=%d", self._queue.maxsize, nabirds_id,
+            )
+            self._gate.revert_record(nabirds_id, now)
             return False
         return True
 
@@ -73,18 +76,29 @@ class NotificationDispatcher:
                 break
             self._send_with_retry(msg)
 
-    def _send_with_retry(self, msg: TelegramMessage) -> None:
-        for attempt in range(3):
+    def _send_with_retry(self, msg: TelegramMessage, max_attempts: int = 3) -> None:
+        for attempt in range(max_attempts):
+            if self._stop.is_set():
+                return
             if self._notifier.send_photo(msg):
                 return
-            time.sleep(min(2 ** attempt, 8))
-        logger.warning("Telegram send failed after retries (chat=%s)", msg.chat_id)
+            if attempt < max_attempts - 1:
+                # Cancellable backoff: wakes immediately if shutdown is set.
+                if self._stop.wait(timeout=min(2 ** attempt, 4)):
+                    return
+        logger.warning(
+            "Telegram send failed after %d attempts (chat=%s)",
+            max_attempts, msg.chat_id,
+        )
 
-    def shutdown(self, timeout: float = 2.0) -> None:
+    def shutdown(self, timeout: float = 12.0) -> None:
         self._stop.set()
         try:
             self._queue.put_nowait(None)
         except queue.Full:
             pass
         self._thread.join(timeout=timeout)
-        self._notifier.close()
+        # Only close the client after the worker has actually exited; closing
+        # while a request is in flight can corrupt internal httpx state.
+        if not self._thread.is_alive():
+            self._notifier.close()

@@ -221,18 +221,23 @@ class BirdPipeline:
         logger.info(f"Detection #{self._total_detections}: {species_name} ({confidence:.2f})")
 
         if self._notifier is not None and detection_id is not None:
-            kind = settings.telegram.photo_kind or "annotated"
-            photo_url = photo_url_for(detection_id, kind)
-            deep_link = deep_link_for(detection_id)
-            pct = int(round(confidence * 100))
-            caption = f"🐦 {species_name} {pct}%\n{deep_link}"
-            self._notifier.maybe_enqueue(
-                nabirds_id=nabirds_id,
-                confidence=confidence,
-                photo_url=photo_url,
-                caption=caption,
-                now=timestamp,
-            )
+            try:
+                kind = settings.telegram.photo_kind or "annotated"
+                photo_url = photo_url_for(detection_id, kind)
+                deep_link = deep_link_for(detection_id)
+                pct = int(round(confidence * 100))
+                caption = f"🐦 {species_name} {pct}%\n{deep_link}"
+                self._notifier.maybe_enqueue(
+                    nabirds_id=nabirds_id,
+                    confidence=confidence,
+                    photo_url=photo_url,
+                    caption=caption,
+                    now=timestamp,
+                )
+            except Exception:  # noqa: BLE001 - never let a notifier bug crash the camera loop
+                logger.exception(
+                    "Telegram notifier raised; suppressed to keep pipeline alive"
+                )
 
     def _filter_ignored_regions(
         self,
