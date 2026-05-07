@@ -222,15 +222,17 @@ class BirdPipeline:
 
         if self._notifier is not None and detection_id is not None:
             try:
-                kind = settings.telegram.photo_kind or "annotated"
-                photo_url = photo_url_for(detection_id, kind)
+                photo_urls = [
+                    photo_url_for(detection_id, "annotated"),
+                    photo_url_for(detection_id, "crop"),
+                ]
                 deep_link = deep_link_for(detection_id)
                 pct = int(round(confidence * 100))
                 caption = f"🐦 {species_name} {pct}%\n{deep_link}"
                 self._notifier.maybe_enqueue(
                     nabirds_id=nabirds_id,
                     confidence=confidence,
-                    photo_url=photo_url,
+                    photo_urls=photo_urls,
                     caption=caption,
                     now=timestamp,
                 )
