@@ -11,7 +11,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -50,6 +50,14 @@ def _in_quiet_hours(now: dtime, start: dtime, end: dtime) -> bool:
     return now >= start or now < end
 
 
+def _as_utc(now: datetime) -> datetime:
+    """Pipeline timestamps are naive but contain UTC numbers (the pipeline
+    explicitly does `replace(tzinfo=None)` after `fromtimestamp(tz=utc)`).
+    Treating naive as system-local would make quiet hours and the daily
+    rollover off by the UTC offset, so attach UTC explicitly."""
+    return now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+
+
 class WatchlistGate:
     """Decides whether a detection should fire a notification."""
 
@@ -75,7 +83,8 @@ class WatchlistGate:
         threshold = self.cfg.watchlist.get(nabirds_id)
         if threshold is None or confidence < threshold:
             return False
-        local = now.astimezone(self._tz)
+        utc = _as_utc(now)
+        local = utc.astimezone(self._tz)
         if self._quiet_start and self._quiet_end:
             if _in_quiet_hours(local.time(), self._quiet_start, self._quiet_end):
                 logger.debug(
@@ -93,7 +102,7 @@ class WatchlistGate:
                 return False
             last = self._last_sent.get(nabirds_id)
             if last is not None:
-                remaining = self.cfg.cooldown_seconds - (now.timestamp() - last)
+                remaining = self.cfg.cooldown_seconds - (utc.timestamp() - last)
                 if remaining > 0:
                     logger.debug(
                         "Notification suppressed (cooldown for %d, %.0fs left)",
@@ -103,10 +112,11 @@ class WatchlistGate:
         return True
 
     def record_sent(self, nabirds_id: int, now: datetime) -> None:
-        local_date = now.astimezone(self._tz).date().isoformat()
+        utc = _as_utc(now)
+        local_date = utc.astimezone(self._tz).date().isoformat()
         with self._lock:
             self._roll_daily(local_date)
-            self._last_sent[nabirds_id] = now.timestamp()
+            self._last_sent[nabirds_id] = utc.timestamp()
             self._daily_count += 1
             self._save()
 

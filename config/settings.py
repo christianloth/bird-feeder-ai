@@ -32,8 +32,8 @@ _pipeline = _cfg.get("pipeline", {})
 _location = _cfg.get("location", {})
 _storage = _cfg.get("storage", {})
 _features = _cfg.get("features", {})
-_notifications = _cfg.get("notifications", {})
-_telegram = _notifications.get("telegram", {})
+_notifications = _cfg.get("notifications") or {}
+_telegram = _notifications.get("telegram") or {}
 
 
 def _parse_watchlist(raw) -> dict[int, float]:
