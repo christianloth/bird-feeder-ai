@@ -118,7 +118,84 @@ class WatchlistGate:
             self._roll_daily(local_date)
             self._last_sent[nabirds_id] = utc.timestamp()
             self._daily_count += 1
-            self._save()
+            snapshot = self._snapshot()
+        # Persist outside the lock so disk I/O can't backpressure the
+        # camera thread.
+        self._save_snapshot(*snapshot)
+
+    def check_and_record(
+        self, nabirds_id: int | None, confidence: float, now: datetime
+    ) -> bool:
+        """Atomic gate + reservation. Returns True iff the caller should
+        proceed to send (and the slot has been reserved). On a False return,
+        nothing is mutated. Use revert_record() to release the reservation
+        if the downstream send/enqueue fails."""
+        if not self.cfg.enabled or not self.cfg.chat_id:
+            return False
+        if nabirds_id is None:
+            return False
+        threshold = self.cfg.watchlist.get(nabirds_id)
+        if threshold is None:
+            return False
+        if confidence < threshold:
+            logger.info(
+                "Notification suppressed (below threshold): nabirds_id=%d "
+                "conf=%.2f < %.2f",
+                nabirds_id, confidence, threshold,
+            )
+            return False
+        utc = _as_utc(now)
+        local = utc.astimezone(self._tz)
+        if self._quiet_start and self._quiet_end:
+            if _in_quiet_hours(local.time(), self._quiet_start, self._quiet_end):
+                logger.info(
+                    "Notification suppressed (quiet hours): nabirds_id=%d "
+                    "conf=%.2f at local %s",
+                    nabirds_id, confidence, local.strftime("%H:%M"),
+                )
+                return False
+        ts = utc.timestamp()
+        with self._lock:
+            self._roll_daily(local.date().isoformat())
+            if self._daily_count >= self.cfg.daily_cap:
+                logger.info(
+                    "Notification suppressed (daily cap %d reached)",
+                    self.cfg.daily_cap,
+                )
+                return False
+            last = self._last_sent.get(nabirds_id)
+            if last is not None:
+                remaining = self.cfg.cooldown_seconds - (ts - last)
+                if remaining > 0:
+                    logger.info(
+                        "Notification suppressed (cooldown): nabirds_id=%d "
+                        "conf=%.2f, %.0fs left",
+                        nabirds_id, confidence, remaining,
+                    )
+                    return False
+            # All checks pass — reserve the slot atomically.
+            self._last_sent[nabirds_id] = ts
+            self._daily_count += 1
+            snapshot = self._snapshot()
+        self._save_snapshot(*snapshot)
+        return True
+
+    def revert_record(self, nabirds_id: int, now: datetime) -> None:
+        """Undo a check_and_record reservation if the caller couldn't enqueue."""
+        utc = _as_utc(now)
+        ts = utc.timestamp()
+        with self._lock:
+            # Only remove if the timestamp still matches — guards against a
+            # later record_sent for the same species silently being undone.
+            if self._last_sent.get(nabirds_id) == ts:
+                del self._last_sent[nabirds_id]
+            self._daily_count = max(0, self._daily_count - 1)
+            snapshot = self._snapshot()
+        self._save_snapshot(*snapshot)
+
+    def _snapshot(self) -> tuple[dict[int, float], str | None, int]:
+        """Capture state under the caller's lock for off-lock persistence."""
+        return (dict(self._last_sent), self._daily_date, self._daily_count)
 
     def _roll_daily(self, today: str) -> None:
         if self._daily_date != today:
@@ -148,14 +225,22 @@ class WatchlistGate:
                 self._state_path,
             )
 
-    def _save(self) -> None:
+    def _save_snapshot(
+        self,
+        last_sent: dict[int, float],
+        daily_date: str | None,
+        daily_count: int,
+    ) -> None:
+        """Persist a snapshot. Caller must NOT hold self._lock — disk I/O
+        can stall on a slow SD card and would otherwise backpressure the
+        camera thread."""
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             tmp = self._state_path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps({
-                "last_sent": {str(k): v for k, v in self._last_sent.items()},
-                "daily_date": self._daily_date,
-                "daily_count": self._daily_count,
+                "last_sent": {str(k): v for k, v in last_sent.items()},
+                "daily_date": daily_date,
+                "daily_count": daily_count,
             }))
             tmp.replace(self._state_path)
         except OSError as e:
