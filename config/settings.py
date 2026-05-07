@@ -71,6 +71,9 @@ class TelegramNotificationConfig:
     daily_cap: int = int(_telegram.get("daily_cap", 50))
     quiet_hours_start: str | None = _telegram.get("quiet_hours_start") or None
     quiet_hours_end: str | None = _telegram.get("quiet_hours_end") or None
+    # Fire an alert the first time a species shows up (or shows up again
+    # after every prior detection of it has been deleted from the dashboard).
+    alert_on_new_species: bool = bool(_telegram.get("alert_on_new_species", False))
     watchlist: dict[int, float] = field(
         default_factory=lambda: _parse_watchlist(_telegram.get("watchlist"))
     )

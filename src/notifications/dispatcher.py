@@ -66,6 +66,32 @@ class NotificationDispatcher:
             return False
         return True
 
+    def maybe_enqueue_new_species(
+        self,
+        photo_urls: list[str],
+        caption: str,
+        now: datetime,
+    ) -> bool:
+        """One-shot new-species alert. Bypasses watchlist match and
+        per-species cooldown; still respects enabled + chat_id + quiet
+        hours + daily cap."""
+        if not self._gate.check_new_species(now):
+            return False
+        try:
+            self._queue.put_nowait(TelegramMessage(
+                chat_id=self._gate.cfg.chat_id,
+                photo_urls=photo_urls,
+                caption=caption,
+            ))
+        except queue.Full:
+            logger.warning(
+                "Telegram queue full (size=%d); dropping new-species alert",
+                self._queue.maxsize,
+            )
+            self._gate.revert_daily()
+            return False
+        return True
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
