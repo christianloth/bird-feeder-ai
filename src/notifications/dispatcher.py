@@ -40,7 +40,7 @@ class NotificationDispatcher:
         self,
         nabirds_id: int | None,
         confidence: float,
-        photo_url: str,
+        photo_urls: list[str],
         caption: str,
         now: datetime,
     ) -> bool:
@@ -54,7 +54,7 @@ class NotificationDispatcher:
         try:
             self._queue.put_nowait(TelegramMessage(
                 chat_id=self._gate.cfg.chat_id,
-                photo_url=photo_url,
+                photo_urls=photo_urls,
                 caption=caption,
             ))
         except queue.Full:
@@ -80,7 +80,7 @@ class NotificationDispatcher:
         for attempt in range(max_attempts):
             if self._stop.is_set():
                 return
-            if self._notifier.send_photo(msg):
+            if self._notifier.send_album(msg):
                 return
             if attempt < max_attempts - 1:
                 # Cancellable backoff: wakes immediately if shutdown is set.
