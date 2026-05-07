@@ -95,7 +95,7 @@ class WatchlistGate:
         with self._lock:
             self._roll_daily(local.date().isoformat())
             if self._daily_count >= self.cfg.daily_cap:
-                logger.info(
+                logger.debug(
                     "Notification suppressed (daily cap %d reached)",
                     self.cfg.daily_cap,
                 )
@@ -138,7 +138,7 @@ class WatchlistGate:
         if threshold is None:
             return False
         if confidence < threshold:
-            logger.info(
+            logger.debug(
                 "Notification suppressed (below threshold): nabirds_id=%d "
                 "conf=%.2f < %.2f",
                 nabirds_id, confidence, threshold,
@@ -148,7 +148,7 @@ class WatchlistGate:
         local = utc.astimezone(self._tz)
         if self._quiet_start and self._quiet_end:
             if _in_quiet_hours(local.time(), self._quiet_start, self._quiet_end):
-                logger.info(
+                logger.debug(
                     "Notification suppressed (quiet hours): nabirds_id=%d "
                     "conf=%.2f at local %s",
                     nabirds_id, confidence, local.strftime("%H:%M"),
@@ -158,7 +158,7 @@ class WatchlistGate:
         with self._lock:
             self._roll_daily(local.date().isoformat())
             if self._daily_count >= self.cfg.daily_cap:
-                logger.info(
+                logger.debug(
                     "Notification suppressed (daily cap %d reached)",
                     self.cfg.daily_cap,
                 )
@@ -167,7 +167,7 @@ class WatchlistGate:
             if last is not None:
                 remaining = self.cfg.cooldown_seconds - (ts - last)
                 if remaining > 0:
-                    logger.info(
+                    logger.debug(
                         "Notification suppressed (cooldown): nabirds_id=%d "
                         "conf=%.2f, %.0fs left",
                         nabirds_id, confidence, remaining,
