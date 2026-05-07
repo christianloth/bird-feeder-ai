@@ -183,6 +183,7 @@ class BirdPipeline:
 
         detection_id: int | None = None
         nabirds_id: int | None = None
+        is_new_species: bool = False
         try:
             with self._session_factory() as session:
                 species = session.query(Species).filter(
@@ -194,6 +195,14 @@ class BirdPipeline:
                         f"Species '{species_name}' not found in database, "
                         "detection will have no species link"
                     )
+                else:
+                    # Count existing detections for this species BEFORE the
+                    # new row is inserted. count==0 ⇒ first ever sighting,
+                    # or every prior sighting was deleted via the dashboard.
+                    existing = session.query(Detection).filter(
+                        Detection.species_id == species.id
+                    ).count()
+                    is_new_species = existing == 0
 
                 x1, y1, x2, y2 = bbox
                 detection = Detection(
@@ -228,14 +237,24 @@ class BirdPipeline:
                 ]
                 deep_link = deep_link_for(detection_id)
                 pct = int(round(confidence * 100))
-                caption = f"🐦 {species_name} {pct}%\n{deep_link}"
-                self._notifier.maybe_enqueue(
-                    nabirds_id=nabirds_id,
-                    confidence=confidence,
-                    photo_urls=photo_urls,
-                    caption=caption,
-                    now=timestamp,
-                )
+                if is_new_species and settings.telegram.alert_on_new_species:
+                    caption = (
+                        f"🌟 NEW SPECIES: {species_name} ({pct}%)\n{deep_link}"
+                    )
+                    self._notifier.maybe_enqueue_new_species(
+                        photo_urls=photo_urls,
+                        caption=caption,
+                        now=timestamp,
+                    )
+                else:
+                    caption = f"🐦 {species_name} {pct}%\n{deep_link}"
+                    self._notifier.maybe_enqueue(
+                        nabirds_id=nabirds_id,
+                        confidence=confidence,
+                        photo_urls=photo_urls,
+                        caption=caption,
+                        now=timestamp,
+                    )
             except Exception:  # noqa: BLE001 - never let a notifier bug crash the camera loop
                 logger.exception(
                     "Telegram notifier raised; suppressed to keep pipeline alive"

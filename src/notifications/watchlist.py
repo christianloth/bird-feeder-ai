@@ -180,6 +180,36 @@ class WatchlistGate:
         self._save_snapshot(*snapshot)
         return True
 
+    def check_new_species(self, now: datetime) -> bool:
+        """Atomic gate for one-shot new-species alerts. Skips the watchlist
+        match and per-species cooldown (semantically once-per-species until
+        the user deletes its detections), but still respects enabled +
+        chat_id + quiet hours + daily cap. Reserves a daily-cap slot on
+        success; caller should treat enqueue failure as best-effort."""
+        if not self.cfg.enabled or not self.cfg.chat_id:
+            return False
+        utc = _as_utc(now)
+        local = utc.astimezone(self._tz)
+        if self._quiet_start and self._quiet_end:
+            if _in_quiet_hours(local.time(), self._quiet_start, self._quiet_end):
+                logger.debug(
+                    "New-species alert suppressed (quiet hours): local %s",
+                    local.strftime("%H:%M"),
+                )
+                return False
+        with self._lock:
+            self._roll_daily(local.date().isoformat())
+            if self._daily_count >= self.cfg.daily_cap:
+                logger.debug(
+                    "New-species alert suppressed (daily cap %d reached)",
+                    self.cfg.daily_cap,
+                )
+                return False
+            self._daily_count += 1
+            snapshot = self._snapshot()
+        self._save_snapshot(*snapshot)
+        return True
+
     def revert_record(self, nabirds_id: int, now: datetime) -> None:
         """Undo a check_and_record reservation if the caller couldn't enqueue."""
         utc = _as_utc(now)
@@ -189,6 +219,14 @@ class WatchlistGate:
             # later record_sent for the same species silently being undone.
             if self._last_sent.get(nabirds_id) == ts:
                 del self._last_sent[nabirds_id]
+            self._daily_count = max(0, self._daily_count - 1)
+            snapshot = self._snapshot()
+        self._save_snapshot(*snapshot)
+
+    def revert_daily(self) -> None:
+        """Release just the daily-cap slot reserved by check_new_species
+        when the caller couldn't enqueue."""
+        with self._lock:
             self._daily_count = max(0, self._daily_count - 1)
             snapshot = self._snapshot()
         self._save_snapshot(*snapshot)

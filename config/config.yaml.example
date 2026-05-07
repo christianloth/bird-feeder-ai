@@ -102,6 +102,11 @@ notifications:
     daily_cap: 50                            # Max notifications per local day
     quiet_hours_start: null                  # e.g. "22:00" (local time) or null
     quiet_hours_end: null                    # e.g. "07:00" (local time) or null
+    # Notify the first time each species is seen — i.e. the species row in
+    # the database has zero detections at the moment of capture. Re-fires
+    # for a species after every prior detection of it has been deleted
+    # via the dashboard. Skips the watchlist and per-species cooldown.
+    alert_on_new_species: false
     # Watched species. NABirds IDs from data/nabirds/classes.txt — same
     # convention as disabled_species_ids above. min_confidence overrides the
     # classifier's global threshold for notification purposes only.
