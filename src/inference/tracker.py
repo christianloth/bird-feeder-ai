@@ -46,6 +46,7 @@ class BirdTrack:
     classified: bool = False  # True = passed confidence threshold, stop retrying
     species: str | None = None  # Current best species from averaged logits
     confidence: float = 0.0  # Confidence from averaged logits (not single-frame)
+    detector_confidence: float = 0.0  # Detector (YOLO) bbox confidence from latest matched frame
     frame_count: int = 0  # Number of frames this track has been detected
     logit_sum: np.ndarray | None = None  # Running sum of raw logits across frames
     classify_count: int = 0  # Number of frames classified so far
@@ -140,7 +141,11 @@ class BirdTracker:
             det = NorfairDetection(
                 points=np.array([[x1, y1], [x2, y2]], dtype=float),
                 scores=np.array([conf, conf]),
-                data={"bbox": (x1, y1, x2, y2), "frame": self._frame_counter},
+                data={
+                    "bbox": (x1, y1, x2, y2),
+                    "frame": self._frame_counter,
+                    "detector_conf": float(conf),
+                },
             )
             norfair_dets.append(det)
 
@@ -193,6 +198,11 @@ class BirdTracker:
             track.last_seen = now
             if detected_this_frame:
                 track.frame_count += 1
+                # Record detector conf from the matching detection so we
+                # can persist it on the Detection row at save time.
+                dc = obj.last_detection.data.get("detector_conf")
+                if dc is not None:
+                    track.detector_confidence = float(dc)
 
             # Only classify tracks with a fresh detection (new crop to work with)
             # that haven't been confidently classified yet

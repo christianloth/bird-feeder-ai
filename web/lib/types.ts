@@ -12,6 +12,7 @@ export interface Detection {
   species_id: number | null;
   species_name: string | null;
   confidence: number;
+  detector_confidence: number | null;
   detection_model: string | null;
   classifier_model: string | null;
   bbox_x1: number | null;

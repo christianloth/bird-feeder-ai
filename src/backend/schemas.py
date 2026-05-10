@@ -37,7 +37,8 @@ class DetectionResponse(BaseModel):
     timestamp: datetime
     species_id: int | None = None
     species_name: str | None = None
-    confidence: float
+    confidence: float                        # Stage-2 ViT classifier probability
+    detector_confidence: float | None = None # Stage-1 detector (YOLO) bbox confidence (NULL for older rows)
     detection_model: str | None = None
     classifier_model: str | None = None
     bbox_x1: float | None = None

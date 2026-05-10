@@ -26,6 +26,7 @@ from src.backend.database import (
     Species,
     load_species_from_dataset,
     load_wildlife_species,
+    migrate_detection_detector_confidence,
     migrate_species_category,
     migrate_species_nabirds_id,
 )
@@ -126,6 +127,7 @@ class BirdPipeline:
         engine = create_tables()
         migrate_species_category(engine)
         migrate_species_nabirds_id(engine)
+        migrate_detection_detector_confidence(engine)
         self._session_factory = get_session_factory(engine)
 
         # Load species from NABirds if not already in DB
@@ -152,6 +154,7 @@ class BirdPipeline:
         detection_model: str = "yolov8n",
         classifier_model: str = "vit_small_nabirds",
         source: str = "rtsp",
+        detector_confidence: float | None = None,
     ):
         """Save a detection to storage and database, with species cooldown."""
         # Species cooldown: skip if we recently saved the same species.
@@ -209,6 +212,7 @@ class BirdPipeline:
                     timestamp=timestamp,
                     species_id=species.id if species else None,
                     confidence=confidence,
+                    detector_confidence=detector_confidence,
                     detection_model=detection_model,
                     classifier_model=classifier_model,
                     bbox_x1=float(x1),
@@ -440,6 +444,7 @@ class BirdPipeline:
                         detection_model=detection_model_name,
                         classifier_model=settings.classifier_model_path.stem,
                         source=self._source,
+                        detector_confidence=track.detector_confidence or None,
                     )
 
                 new_detections.append({
@@ -512,6 +517,7 @@ class BirdPipeline:
                             detection_model=Path(settings.wildlife_model).parent.parent.name,
                             classifier_model=Path(settings.wildlife_model).parent.parent.name,
                             source=self._source,
+                            detector_confidence=track.detector_confidence or None,
                         )
 
                     new_detections.append({

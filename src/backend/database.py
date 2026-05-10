@@ -70,7 +70,12 @@ class Detection(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     species_id: Mapped[int | None] = mapped_column(ForeignKey("species.id"), index=True)
+    # `confidence` is the Stage-2 ViT classifier's species probability.
+    # `detector_confidence` is the Stage-1 detector's (YOLO) bbox
+    # confidence — nullable because rows saved before the column was
+    # added stay NULL.
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    detector_confidence: Mapped[float | None] = mapped_column(Float)
     detection_model: Mapped[str | None] = mapped_column(String(100))
     classifier_model: Mapped[str | None] = mapped_column(String(100))
     bbox_x1: Mapped[float | None] = mapped_column(Float)
@@ -241,6 +246,17 @@ def migrate_species_category(engine) -> None:
     if "category" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE species ADD COLUMN category VARCHAR(20) DEFAULT 'bird'"))
+
+
+def migrate_detection_detector_confidence(engine) -> None:
+    """Add detector_confidence column to detections (for existing DBs).
+    Historical rows stay NULL — we never recorded the detector's bbox
+    confidence before this column existed."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("detections")]
+    if "detector_confidence" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE detections ADD COLUMN detector_confidence FLOAT"))
 
 
 def migrate_species_nabirds_id(engine) -> None:

@@ -306,8 +306,17 @@ function DashboardInner() {
                 {viewing.detection_model ? ` · ${viewing.detection_model}` : ""}
                 {viewing.classifier_model ? ` → ${viewing.classifier_model}` : ""}
               </div>
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
-                {formatPct(viewing.confidence)}
+              <div className="mt-3 flex flex-col items-center gap-2">
+                {viewing.detector_confidence != null && (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
+                    <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">DETECT</span>
+                    {formatPct(viewing.detector_confidence)}
+                  </div>
+                )}
+                <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
+                  <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">SPECIES</span>
+                  {formatPct(viewing.confidence)}
+                </div>
               </div>
             </div>
           </div>
