@@ -80,19 +80,36 @@ export function SnapshotCanvas({
   // pixels (stored in the DB) and displayed pixels (the pointer events).
   const [displayed, setDisplayed] = useState<{ w: number; h: number } | null>(null);
 
-  // Recompute displayed size on resize.
+  // Sync natural + displayed sizes from the <img>, both on mount (catches
+  // the "image was served from cache, onLoad already fired before React
+  // attached its handler" race) and on every resize (catches the "parent
+  // grid hadn't finished laying out when onLoad fired so the rect was
+  // still 0×0" race). Re-attaches whenever the src changes via refreshKey.
   useEffect(() => {
     const el = imgRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    const sync = () => {
+      if (el.complete && el.naturalWidth > 0 && el.naturalHeight > 0) {
+        setImgSize((prev) =>
+          prev && prev.w === el.naturalWidth && prev.h === el.naturalHeight
+            ? prev
+            : { w: el.naturalWidth, h: el.naturalHeight },
+        );
+      }
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        setDisplayed({ w: rect.width, h: rect.height });
+        setDisplayed((prev) =>
+          prev && prev.w === rect.width && prev.h === rect.height
+            ? prev
+            : { w: rect.width, h: rect.height },
+        );
       }
-    });
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [imgSize]);
+  }, [refreshKey]);
 
   // Notify parent of natural dimensions on load.
   useEffect(() => {

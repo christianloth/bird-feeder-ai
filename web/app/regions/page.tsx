@@ -119,13 +119,16 @@ export default function RegionsPage() {
     });
   }, [regions, optimistic]);
 
-  // ── Deselect on any pointer-down that lands outside a rectangle ─────
-  // Covers taps on the snapshot background, the threshold strip, the
-  // regions list, the page chrome — anywhere that isn't the rectangle
-  // body or one of its handles.
+  // ── Deselect on any click inside the snapshot frame that lands
+  // outside a rectangle. Scoped to .regions-frame so clicks on the
+  // header, side rail, page chrome, etc. never reach this listener
+  // — those should navigate / interact normally without any of our
+  // event handlers running.
   useEffect(() => {
     if (selectedId === null) return;
-    const onDown = (e: PointerEvent) => {
+    const root = document.querySelector(".regions-frame");
+    if (!root) return;
+    const onClick = (e: Event) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (target.closest(".regions-rect") || target.closest(".regions-handle")) {
@@ -133,8 +136,8 @@ export default function RegionsPage() {
       }
       setSelectedId(null);
     };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
   }, [selectedId]);
 
   // ── Esc cancels draw mode, Backspace deletes selected ────────────────
