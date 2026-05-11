@@ -2,10 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { LogoMark, GrafanaIcon, HomeIcon, RegionsIcon, ReviewIcon, SweepIcon } from "./Logo";
+
+// Header uses plain <a> tags for cross-page navigation rather than
+// next/link. With output: "export" + React 19, Link's router.push()
+// sometimes silently no-ops on phones (see "Add temporary on-screen
+// click logger" commit for the diagnostic that exposed this). A hard
+// page navigation is slightly less snappy but works every time.
 
 export function Header() {
   const pathname = usePathname() ?? "/dashboard";
@@ -39,8 +44,8 @@ export function Header() {
       <div className="absolute inset-0 -z-10 border-b border-[var(--color-moss-700)] bg-[linear-gradient(180deg,rgba(7,9,10,0.85),rgba(7,9,10,0.55))]" />
 
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4">
-        <Link
-          href="/dashboard"
+        <a
+          href="/dashboard/"
           className="group flex min-w-0 items-center gap-2.5 sm:gap-3"
         >
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[var(--color-moss-700)] bg-[rgba(20,26,22,0.6)] transition-all group-hover:border-[var(--color-ember-500)]">
@@ -54,46 +59,46 @@ export function Header() {
               Frisco · TX <span className="mx-2 opacity-40">/</span> 32.78°N 96.83°W
             </span>
           </span>
-        </Link>
+        </a>
 
         <nav className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <Link
-            href="/dashboard"
+          <a
+            href="/dashboard/"
             data-active={isDashboard}
             aria-label="Dashboard"
             className="nav-btn"
           >
             <HomeIcon size={18} />
             <span className="hidden sm:inline">Dashboard</span>
-          </Link>
-          <Link
-            href="/review"
+          </a>
+          <a
+            href="/review/"
             data-active={isReview}
             aria-label="Review"
             className="nav-btn"
           >
             <ReviewIcon size={18} />
             <span className="hidden sm:inline">Review</span>
-          </Link>
-          <Link
-            href="/regions"
+          </a>
+          <a
+            href="/regions/"
             data-active={isRegions}
             aria-label="Regions"
             className="nav-btn"
           >
             <RegionsIcon size={18} />
             <span className="hidden sm:inline">Regions</span>
-          </Link>
+          </a>
           {sweepEnabled ? (
-            <Link
-              href="/sweep"
+            <a
+              href="/sweep/"
               data-active={isSweep}
               aria-label="Sweep"
               className="nav-btn"
             >
               <SweepIcon size={18} />
               <span className="hidden sm:inline">Sweep</span>
-            </Link>
+            </a>
           ) : null}
           <a
             href="/grafana"

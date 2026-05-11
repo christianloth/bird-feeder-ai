@@ -9,31 +9,68 @@ interface Entry {
   text: string;
 }
 
+const STORAGE_KEY = "bfa.debugClicks";
+
 /**
  * Floating bottom-left debug panel that captures every click on the page
- * plus pathname changes. Used to diagnose "tapping a header link does
- * nothing" on mobile, where DevTools isn't easy to reach.
+ * plus pathname changes and global JS errors.
  *
- * Remove once the navigation bug is sorted.
+ * Opt-in. Hidden by default. To turn on, append `?debug=1` to any URL —
+ * the flag persists in localStorage so it survives navigation. To turn
+ * off, append `?debug=0` (or clear `bfa.debugClicks` from localStorage).
  */
 export function DebugClickLogger() {
   const pathname = usePathname() ?? "/";
+  const [enabled, setEnabled] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [collapsed, setCollapsed] = useState(false);
+
+  // Read the URL param on mount AND on pathname change, since hard
+  // navigations re-read window.location while soft pushes update it.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get("debug");
+    if (flag === "1") {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      setEnabled(true);
+      return;
+    }
+    if (flag === "0") {
+      try {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+      setEnabled(false);
+      return;
+    }
+    try {
+      setEnabled(window.localStorage.getItem(STORAGE_KEY) === "1");
+    } catch {
+      setEnabled(false);
+    }
+  }, [pathname]);
 
   // Log every pathname change so we can tell whether navigation actually
   // fired or stalled before reaching the new page.
   useEffect(() => {
+    if (!enabled) return;
     setEntries((prev) => {
       const next: Entry = { ts: stamp(), kind: "path", text: `→ ${pathname}` };
       return [next, ...prev].slice(0, 10);
     });
-  }, [pathname]);
+  }, [enabled, pathname]);
 
   // Capture every click on the page. Reports the deepest target and the
   // closest <a> ancestor's href, plus a marker for whether defaultPrevented
   // was already true by the time it bubbled to the document.
   useEffect(() => {
+    if (!enabled) return;
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -57,11 +94,12 @@ export function DebugClickLogger() {
     // preventDefault. Document-level so we catch every click.
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
-  }, []);
+  }, [enabled]);
 
   // Capture global JS errors and unhandled promise rejections — these
   // could explain a stuck navigation.
   useEffect(() => {
+    if (!enabled) return;
     const onError = (e: ErrorEvent) => {
       setEntries((prev) => {
         const next: Entry = {
@@ -92,7 +130,9 @@ export function DebugClickLogger() {
       window.removeEventListener("error", onError);
       window.removeEventListener("unhandledrejection", onReject);
     };
-  }, []);
+  }, [enabled]);
+
+  if (!enabled) return null;
 
   return (
     <div
