@@ -32,6 +32,7 @@ _pipeline = _cfg.get("pipeline", {})
 _location = _cfg.get("location", {})
 _storage = _cfg.get("storage", {})
 _features = _cfg.get("features", {})
+_admin = _cfg.get("admin") or {}
 _notifications = _cfg.get("notifications") or {}
 _telegram = _notifications.get("telegram") or {}
 
@@ -156,6 +157,11 @@ class Settings:
 
     # Feature toggles (consumed by the API and frontend)
     enable_sweep: bool = bool(_features.get("sweep", True))
+
+    # Admin auth — required for every write-method API call. Empty ⇒ writes
+    # are refused with 503 so the server fails closed instead of silently
+    # allowing anonymous writes.
+    admin_token: str = str(_admin.get("token") or "")
 
     # Notifications (Telegram)
     telegram: TelegramNotificationConfig = field(default_factory=TelegramNotificationConfig)

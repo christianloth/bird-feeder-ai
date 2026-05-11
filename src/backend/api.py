@@ -15,8 +15,8 @@ from typing import Annotated, Literal
 from pathlib import Path as _Path
 
 from PIL import Image
-from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
@@ -113,6 +113,36 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+# Read methods are always allowed; mutations require the admin token. Anything
+# outside /api/* falls through (so static assets, the Next.js bundle, /health,
+# and the icon routes load normally).
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+@app.middleware("http")
+async def admin_token_gate(request: Request, call_next):
+    method = request.method.upper()
+    path = request.url.path
+    if method in _READ_METHODS or not path.startswith("/api/"):
+        return await call_next(request)
+    expected = settings.admin_token
+    if not expected:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Admin token not configured on server. "
+                "Set BIRDFEEDER_ADMIN_TOKEN in .env and restart."
+            },
+        )
+    provided = request.headers.get("X-Admin-Token") or ""
+    if provided != expected:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Admin token required"},
+        )
+    return await call_next(request)
 
 _WEB_OUT = _Path(__file__).resolve().parents[2] / "web" / "out"
 

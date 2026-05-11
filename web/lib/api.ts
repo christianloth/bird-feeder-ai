@@ -21,15 +21,71 @@ function buildQuery(params: Record<string, string | number | undefined | null>):
   return qs.toString();
 }
 
+// Admin-token plumbing. Writes (POST/PATCH/PUT/DELETE) need the token;
+// reads stay anonymous. Token is persisted in localStorage so a device
+// only ever has to be unlocked once.
+const TOKEN_KEY = "bfa.adminToken";
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS", undefined]);
+
+function getStoredToken(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function setStoredToken(value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TOKEN_KEY, value);
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function clearStoredToken() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function buildHeaders(init: RequestInit | undefined, token: string): HeadersInit {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(init?.body ? { "Content-Type": "application/json" } : {}),
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  if (token) headers["X-Admin-Token"] = token;
+  return headers;
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  const isWrite = !READ_METHODS.has(init?.method?.toUpperCase());
+  const token = isWrite ? getStoredToken() : "";
+  let res = await fetch(url, { ...init, headers: buildHeaders(init, token) });
+
+  // One-shot recovery: if a write came back 401, prompt for a token,
+  // store it, and retry exactly once. Wrong token on retry throws.
+  if (res.status === 401 && isWrite && typeof window !== "undefined") {
+    clearStoredToken();
+    const entered = window.prompt(
+      "This action needs the admin token. Enter it to continue:",
+      "",
+    );
+    if (entered && entered.trim().length > 0) {
+      setStoredToken(entered.trim());
+      res = await fetch(url, {
+        ...init,
+        headers: buildHeaders(init, entered.trim()),
+      });
+    }
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`${res.status} ${res.statusText}: ${text || url}`);
