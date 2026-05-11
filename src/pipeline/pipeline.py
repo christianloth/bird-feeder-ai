@@ -20,15 +20,19 @@ import numpy as np
 
 from config.settings import settings
 from src.backend.database import (
+    AppSetting,
+    SETTING_IGNORE_OVERLAP_THRESHOLD,
     create_tables,
     get_session_factory,
     Detection,
+    IgnoreRegion,
     Species,
     load_species_from_dataset,
     load_wildlife_species,
     migrate_detection_detector_confidence,
     migrate_species_category,
     migrate_species_nabirds_id,
+    seed_ignore_regions_from_config,
 )
 from src.backend.storage import ImageStorage
 from src.inference.classifier import BirdClassifier
@@ -83,6 +87,18 @@ class BirdPipeline:
         self._species_cooldown: dict[str, float] = {}  # species → last save timestamp
         # Optional Telegram notifier (None when disabled or token missing).
         self._notifier = build_dispatcher()
+        # DB-backed ignore-regions cache. The pipeline runs in a separate
+        # process from the API, so we re-read both regions and the global
+        # overlap threshold every `_ignore_refresh_seconds` of wall-clock
+        # time. SQLite reads of a few rows are essentially free.
+        self._ignore_regions_cache: list[tuple[int, int, int, int]] = []
+        self._ignore_threshold_cache: float = settings.ignore_overlap_threshold
+        self._ignore_last_refresh: float = 0.0
+        self._ignore_refresh_seconds: float = 2.0
+        # Snapshot writer state: produces the JPEG the /regions page draws on.
+        self._snapshot_path: Path = settings.project_root / "data" / "cache" / "latest_snapshot.jpg"
+        self._snapshot_last_write: float = 0.0
+        self._snapshot_interval_seconds: float = 1.5
 
     def _log_pipeline_config(self) -> None:
         """Log pipeline configuration at startup."""
@@ -128,6 +144,7 @@ class BirdPipeline:
         migrate_species_category(engine)
         migrate_species_nabirds_id(engine)
         migrate_detection_detector_confidence(engine)
+        seed_ignore_regions_from_config(engine)
         self._session_factory = get_session_factory(engine)
 
         # Load species from NABirds if not already in DB
@@ -264,6 +281,63 @@ class BirdPipeline:
                     "Telegram notifier raised; suppressed to keep pipeline alive"
                 )
 
+    def _refresh_ignore_cache(self) -> None:
+        """Reload regions + threshold from the DB if the refresh window expired.
+
+        The /regions UI writes through the API process, so the pipeline can't
+        be notified directly — we just re-poll cheaply. Disabled regions are
+        filtered out here so the hot path stays a flat list.
+        """
+        if self._session_factory is None:
+            return
+        now = time.time()
+        if now - self._ignore_last_refresh < self._ignore_refresh_seconds:
+            return
+        self._ignore_last_refresh = now
+        try:
+            with self._session_factory() as session:
+                rows = session.query(IgnoreRegion).filter(
+                    IgnoreRegion.enabled.is_(True)
+                ).all()
+                self._ignore_regions_cache = [
+                    (int(r.x1), int(r.y1), int(r.x2), int(r.y2)) for r in rows
+                ]
+                setting = session.get(AppSetting, SETTING_IGNORE_OVERLAP_THRESHOLD)
+                if setting is not None:
+                    try:
+                        self._ignore_threshold_cache = float(setting.value)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to refresh ignore-regions cache; keeping previous values")
+
+    def _write_snapshot(self, frame: np.ndarray) -> None:
+        """Periodically write the latest rotated frame to disk so the API
+        (separate process) can serve it as the /regions page backdrop.
+
+        Throttled to ~once per `_snapshot_interval_seconds` to avoid IO
+        churn. Writes via a temp file + atomic rename so the API never
+        reads a half-written JPEG."""
+        now = time.time()
+        if now - self._snapshot_last_write < self._snapshot_interval_seconds:
+            return
+        try:
+            import cv2
+            self._snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            # cv2.imwrite picks encoder by file extension, so encode to bytes
+            # in memory and write atomically via a sibling temp file. Avoids
+            # both partial reads from the API and "unknown extension" errors.
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 78])
+            if not ok:
+                return
+            tmp = self._snapshot_path.with_name(self._snapshot_path.name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write(buf.tobytes())
+            tmp.replace(self._snapshot_path)
+            self._snapshot_last_write = now
+        except Exception:  # noqa: BLE001
+            logger.exception("Snapshot write failed; will retry on next frame")
+
     def _filter_ignored_regions(
         self,
         bboxes: list[tuple[int, int, int, int]],
@@ -272,15 +346,15 @@ class BirdPipeline:
         """Drop detections that overlap a configured ignore region.
 
         A detection is dropped if (intersection_area / detection_area) is
-        >= settings.ignore_overlap_threshold for any ignore region. This
-        suppresses static fake birds / decoys while letting real birds that
-        merely clip the corner of the zone through.
+        >= the global overlap threshold for any enabled ignore region.
+        Regions and threshold come from the DB (managed via /regions UI).
         """
-        regions = settings.ignore_regions
+        self._refresh_ignore_cache()
+        regions = self._ignore_regions_cache
         if not regions:
             return bboxes, confidences
 
-        threshold = settings.ignore_overlap_threshold
+        threshold = self._ignore_threshold_cache
         kept_bboxes: list[tuple[int, int, int, int]] = []
         kept_confs: list[float] = []
         for bbox, conf in zip(bboxes, confidences):
@@ -468,7 +542,8 @@ class BirdPipeline:
         det_ms = (time.perf_counter() - t0) * 1000
         logger.debug(f"Wildlife detection: {len(wildlife_dets)} animals in {det_ms:.1f}ms")
 
-        if settings.ignore_regions:
+        self._refresh_ignore_cache()
+        if self._ignore_regions_cache:
             bboxes_in = [d.bbox for d in wildlife_dets]
             confs_in = [d.confidence for d in wildlife_dets]
             kept_bboxes, _ = self._filter_ignored_regions(bboxes_in, confs_in)
@@ -574,6 +649,10 @@ class BirdPipeline:
 
                 if not self.skipper.should_process(frame_result.frame_number):
                     continue
+
+                # Persist a fresh snapshot so the /regions page has a current
+                # backdrop. Throttled internally; cheap when skipped.
+                self._write_snapshot(frame_result.frame)
 
                 try:
                     detections = self.process_frame(

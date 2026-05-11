@@ -34,6 +34,12 @@
   /* Effects */
   --radius-card: 14px;
   --shadow-glow: 0 30px 80px -30px rgba(224, 169, 109, 0.18);
+
+  /* Bounding-box red — matches the colour drawn on annotated detection
+     frames (#ff0033). Used for the /regions page rectangles. */
+  --color-bbox: #ff0033;
+  --color-bbox-soft: rgba(255, 0, 51, 0.16);
+  --color-bbox-soft-strong: rgba(255, 0, 51, 0.24);
 }
 
 :root {
@@ -487,6 +493,293 @@ details > summary::-webkit-details-marker { display: none; }
   transform: translateX(-50%);
   z-index: 40;
   pointer-events: auto;
+}
+
+/* ----- Regions page ----------------------------------------------------- */
+
+/* Wrapper around the snapshot. Default = `manipulation` so two-finger
+   pinch-zoom and pan still work on the photo. Switches to `none` only
+   when actively drawing, so the one-finger drag-to-draw isn't hijacked
+   by the browser's pan gesture. */
+.regions-canvas {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.regions-canvas[data-mode="draw"] {
+  touch-action: none;
+}
+
+/* Survey-marker corner reticles on the snapshot */
+.regions-frame::before,
+.regions-frame::after,
+.regions-frame > .reticle {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--color-ember-400);
+  pointer-events: none;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 6px rgba(244, 207, 138, 0.35));
+}
+.regions-frame::before {
+  top: 8px; left: 8px;
+  border-right: none; border-bottom: none;
+}
+.regions-frame::after {
+  top: 8px; right: 8px;
+  border-left: none; border-bottom: none;
+}
+.regions-frame > .reticle.bl {
+  bottom: 8px; left: 8px;
+  border-right: none; border-top: none;
+}
+.regions-frame > .reticle.br {
+  bottom: 8px; right: 8px;
+  border-left: none; border-top: none;
+}
+
+/* Faint scanline + grain over the camera snapshot — sells the "viewfinder" */
+.regions-overlay-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+
+/* Marquee while drawing a brand-new rectangle */
+.regions-marquee {
+  position: absolute;
+  border: 1.5px dashed var(--color-bbox);
+  background: var(--color-bbox-soft);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  animation: marquee-march 0.8s linear infinite;
+}
+@keyframes marquee-march {
+  to { background-position: 12px 0, 12px 0, 0 12px, 0 12px; }
+}
+
+/* Saved region rectangle on the canvas. Default touch-action allows
+   pinch-zoom even when the finger lands on a rectangle. Once selected,
+   the rectangle body becomes draggable on touch. */
+.regions-rect {
+  position: absolute;
+  border: 2px solid var(--color-bbox);
+  background: var(--color-bbox-soft);
+  transition: border-color 180ms ease, background-color 180ms ease,
+    box-shadow 220ms ease;
+  cursor: move;
+  touch-action: manipulation;
+}
+.regions-rect[data-selected="true"] {
+  touch-action: none;
+}
+.regions-rect[data-disabled="true"] {
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--color-bbox) 55%, var(--color-moss-500));
+  background: color-mix(in oklab, var(--color-bbox) 6%, transparent);
+}
+.regions-rect[data-selected="true"] {
+  border-color: var(--color-bbox);
+  background: var(--color-bbox-soft-strong);
+  box-shadow:
+    0 0 0 1px rgba(255, 0, 51, 0.45),
+    0 16px 36px -16px rgba(255, 0, 51, 0.55);
+}
+
+/* Tag floating at top-left of each rectangle */
+.regions-tag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(0, -100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.5rem 0.22rem 0.5rem;
+  margin-bottom: 2px;
+  border-radius: 6px 6px 6px 0;
+  background: rgba(7, 9, 10, 0.82);
+  border: 1px solid color-mix(in oklab, var(--color-bbox) 55%, transparent);
+  backdrop-filter: blur(6px);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  pointer-events: none;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.regions-tag .label {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--color-cream-50);
+}
+.regions-tag .coords {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--color-sage-200);
+}
+
+/* Resize / move handles on the selected rectangle. `touch-action: none`
+   so the drag is owned by us, not the browser's pan gesture. */
+.regions-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--color-ember-300);
+  border: 1px solid var(--color-ink-900);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  touch-action: none;
+}
+.regions-handle.h-nw { cursor: nwse-resize; }
+.regions-handle.h-ne { cursor: nesw-resize; }
+.regions-handle.h-se { cursor: nwse-resize; }
+.regions-handle.h-sw { cursor: nesw-resize; }
+.regions-handle.h-n,  .regions-handle.h-s { cursor: ns-resize; }
+.regions-handle.h-e,  .regions-handle.h-w { cursor: ew-resize; }
+
+/* Bigger touch targets on phones — the visible square stays small but the
+   hit area expands via a transparent ::before pseudo-element. */
+.regions-handle::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+
+/* Crosshair cursor while in "draw" mode */
+.regions-canvas[data-mode="draw"] {
+  cursor: crosshair;
+}
+
+/* Region row in the side rail / mobile list */
+.regions-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(20, 26, 22, 0.55);
+  border: 1px solid var(--color-moss-700);
+  transition: border-color 200ms ease, background 220ms ease,
+    box-shadow 240ms ease, transform 220ms ease;
+  cursor: pointer;
+}
+.regions-row:hover {
+  border-color: color-mix(in oklab, var(--color-ember-500) 50%, var(--color-moss-500));
+  background: rgba(20, 26, 22, 0.75);
+}
+.regions-row[data-selected="true"] {
+  border-color: var(--color-ember-400);
+  background: linear-gradient(180deg, rgba(244, 207, 138, 0.10), rgba(176, 119, 68, 0.04));
+  box-shadow: 0 0 0 1px rgba(244, 207, 138, 0.18),
+    0 14px 36px -16px rgba(244, 207, 138, 0.35);
+}
+.regions-row[data-disabled="true"] {
+  opacity: 0.55;
+}
+
+/* Toggle switch — flat, ember when on */
+.regions-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--color-ink-700);
+  border: 1px solid var(--color-moss-700);
+  transition: background 220ms ease, border-color 220ms ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.regions-toggle::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--color-sage-100);
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease;
+}
+.regions-toggle[data-on="true"] {
+  background: linear-gradient(180deg, rgba(224, 169, 109, 0.7), rgba(176, 119, 68, 0.55));
+  border-color: var(--color-ember-500);
+}
+.regions-toggle[data-on="true"]::after {
+  transform: translateX(16px);
+  background: var(--color-cream-50);
+}
+
+/* Range slider — match the ember palette */
+input[type="range"].threshold-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].threshold-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--color-ember-500) 0%,
+    var(--color-ember-500) var(--val, 50%),
+    var(--color-ink-700) var(--val, 50%),
+    var(--color-ink-700) 100%
+  );
+  border: 1px solid var(--color-moss-700);
+}
+input[type="range"].threshold-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-ink-700);
+  border: 1px solid var(--color-moss-700);
+}
+input[type="range"].threshold-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px 0 0 999px;
+  background: var(--color-ember-500);
+}
+input[type="range"].threshold-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--color-cream-50);
+  border: 2px solid var(--color-ember-500);
+  margin-top: -8px;
+  box-shadow: 0 4px 12px -4px rgba(244, 207, 138, 0.55);
+  transition: transform 180ms ease;
+}
+input[type="range"].threshold-range:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+input[type="range"].threshold-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-cream-50);
+  border: 2px solid var(--color-ember-500);
+  box-shadow: 0 4px 12px -4px rgba(244, 207, 138, 0.55);
 }
 
 /* Pagination */

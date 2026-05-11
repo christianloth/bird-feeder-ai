@@ -73,11 +73,39 @@ export interface DetectionsQuery {
 }
 
 export interface IgnoreRegion {
+  id: number;
+  label: string;
   x1: number;
   y1: number;
   x2: number;
   y2: number;
-  label: string;
+  overlap_threshold: number | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IgnoreRegionCreate {
+  label?: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  overlap_threshold?: number | null;
+  enabled?: boolean;
+}
+
+export interface IgnoreRegionUpdate {
+  label?: string;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+  overlap_threshold?: number | null;
+  enabled?: boolean;
+}
+
+export interface IgnoreSettings {
   overlap_threshold: number;
 }
 

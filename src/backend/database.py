@@ -105,6 +105,52 @@ class Detection(Base):
         return f"<Detection {species_name} @ {self.timestamp} ({self.confidence:.2f})>"
 
 
+class IgnoreRegion(Base):
+    """Pixel rectangle in the rotated camera frame where YOLO detections
+    should be suppressed. Replaces the static `ignore_regions` list that
+    previously lived in config.yaml — managed via the /regions web UI.
+
+    Coordinates are stored as floats so the UI can persist sub-pixel edits
+    cleanly, but the pipeline rounds to ints when filtering."""
+
+    __tablename__ = "ignore_regions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    x1: Mapped[float] = mapped_column(Float, nullable=False)
+    y1: Mapped[float] = mapped_column(Float, nullable=False)
+    x2: Mapped[float] = mapped_column(Float, nullable=False)
+    y2: Mapped[float] = mapped_column(Float, nullable=False)
+    # Per-region override. NULL ⇒ use the global threshold from app_settings.
+    overlap_threshold: Mapped[float | None] = mapped_column(Float)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<IgnoreRegion {self.label or '?'} ({self.x1},{self.y1})→({self.x2},{self.y2})>"
+
+
+class AppSetting(Base):
+    """Tiny key/value store for runtime-tunable settings that need to be
+    shared between the pipeline process and the API process. Right now this
+    holds the global ignore-overlap threshold; future cross-process toggles
+    can land here too without another schema migration."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(500), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+SETTING_IGNORE_OVERLAP_THRESHOLD = "ignore_overlap_threshold"
+
+
 class WeatherObservation(Base):
     __tablename__ = "weather_observations"
 
@@ -257,6 +303,40 @@ def migrate_detection_detector_confidence(engine) -> None:
     if "detector_confidence" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE detections ADD COLUMN detector_confidence FLOAT"))
+
+
+def seed_ignore_regions_from_config(engine) -> None:
+    """One-time import: copy regions + threshold from config.yaml into the DB.
+
+    Runs only when the new tables are empty, so it's safe to call on every
+    startup. After this seeds, config.yaml's `bird_detection.ignore_regions`
+    is informational only — the pipeline reads from the DB.
+    """
+    factory = sessionmaker(bind=engine)
+    with factory() as session:
+        # Seed regions if table is empty.
+        if session.query(IgnoreRegion).count() == 0:
+            yaml_regions = settings.ignore_regions
+            for idx, region in enumerate(yaml_regions, start=1):
+                x1, y1, x2, y2 = region
+                session.add(IgnoreRegion(
+                    label=f"Imported region {idx}",
+                    x1=float(x1),
+                    y1=float(y1),
+                    x2=float(x2),
+                    y2=float(y2),
+                    overlap_threshold=None,
+                    enabled=True,
+                ))
+
+        # Seed threshold setting if missing.
+        existing = session.get(AppSetting, SETTING_IGNORE_OVERLAP_THRESHOLD)
+        if existing is None:
+            session.add(AppSetting(
+                key=SETTING_IGNORE_OVERLAP_THRESHOLD,
+                value=str(settings.ignore_overlap_threshold),
+            ))
+        session.commit()
 
 
 def migrate_species_nabirds_id(engine) -> None:

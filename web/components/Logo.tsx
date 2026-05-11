@@ -94,6 +94,28 @@ export function SweepIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+export function RegionsIcon({ size = 18 }: { size?: number }) {
+  // Crosshair / surveyor's reticle inside a frame — matches the "field
+  // surveyor" aesthetic of the /regions page.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1.5" />
+      <path d="M12 6.5v3M12 14.5v3M6.5 12h3M14.5 12h3" />
+      <circle cx="12" cy="12" r="1.6" />
+    </svg>
+  );
+}
+
 export function ReviewIcon({ size = 18 }: { size?: number }) {
   return (
     <svg

@@ -22,7 +22,10 @@ from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
 from src.backend.database import (
+    AppSetting,
+    SETTING_IGNORE_OVERLAP_THRESHOLD,
     Detection,
+    IgnoreRegion,
     Species,
     DailySummary,
     get_engine,
@@ -30,6 +33,7 @@ from src.backend.database import (
     get_session_factory,
     load_wildlife_species,
     migrate_species_category,
+    seed_ignore_regions_from_config,
 )
 from src.backend.schemas import (
     BulkDeleteRequest,
@@ -37,7 +41,11 @@ from src.backend.schemas import (
     DetectionResponse,
     DetectionReview,
     DetectionStats,
+    IgnoreRegionCreate,
     IgnoreRegionResponse,
+    IgnoreRegionUpdate,
+    IgnoreSettings,
+    IgnoreSettingsUpdate,
     SpeciesResponse,
     WeatherResponse,
     DailySummaryResponse,
@@ -66,6 +74,7 @@ async def lifespan(app: FastAPI):
     _engine = get_engine()
     create_tables(_engine)
     migrate_species_category(_engine)
+    seed_ignore_regions_from_config(_engine)
     _session_factory = get_session_factory(_engine)
 
     with _session_factory() as session:
@@ -631,17 +640,137 @@ def get_features():
 
 
 @app.get("/api/ignore-regions", response_model=list[IgnoreRegionResponse])
-def list_ignore_regions():
-    """List the YOLO-detection ignore regions configured for the pipeline."""
-    threshold = settings.ignore_overlap_threshold
-    return [
-        IgnoreRegionResponse(
-            x1=r[0], y1=r[1], x2=r[2], y2=r[3],
-            label=f"({r[0]}, {r[1]}) → ({r[2]}, {r[3]})",
-            overlap_threshold=threshold,
+def list_ignore_regions(session: SessionDep):
+    """List YOLO-detection ignore regions managed via the /regions web UI."""
+    return (
+        session.query(IgnoreRegion)
+        .order_by(IgnoreRegion.created_at.asc(), IgnoreRegion.id.asc())
+        .all()
+    )
+
+
+def _validate_region_geometry(x1: float, y1: float, x2: float, y2: float) -> None:
+    if x2 <= x1 or y2 <= y1:
+        raise HTTPException(
+            status_code=400,
+            detail="Region must satisfy x2 > x1 and y2 > y1",
         )
-        for r in settings.ignore_regions
-    ]
+
+
+@app.post("/api/ignore-regions", response_model=IgnoreRegionResponse, status_code=201)
+def create_ignore_region(body: IgnoreRegionCreate, session: SessionDep):
+    """Create a new ignore region. The pipeline picks up the change on its
+    next refresh tick (≤2s) without needing a restart."""
+    _validate_region_geometry(body.x1, body.y1, body.x2, body.y2)
+    region = IgnoreRegion(
+        label=body.label or "",
+        x1=body.x1,
+        y1=body.y1,
+        x2=body.x2,
+        y2=body.y2,
+        overlap_threshold=body.overlap_threshold,
+        enabled=body.enabled,
+    )
+    session.add(region)
+    session.commit()
+    session.refresh(region)
+    return region
+
+
+# NOTE: /settings routes MUST register before /{region_id} routes — otherwise
+# FastAPI tries to coerce "settings" into the int region_id and 422s.
+
+
+@app.get("/api/ignore-regions/settings", response_model=IgnoreSettings)
+def get_ignore_settings(session: SessionDep):
+    """Read the global overlap threshold (the page-level slider)."""
+    setting = session.get(AppSetting, SETTING_IGNORE_OVERLAP_THRESHOLD)
+    if setting is None:
+        return IgnoreSettings(overlap_threshold=settings.ignore_overlap_threshold)
+    try:
+        return IgnoreSettings(overlap_threshold=float(setting.value))
+    except (TypeError, ValueError):
+        return IgnoreSettings(overlap_threshold=settings.ignore_overlap_threshold)
+
+
+@app.patch("/api/ignore-regions/settings", response_model=IgnoreSettings)
+def update_ignore_settings(body: IgnoreSettingsUpdate, session: SessionDep):
+    """Update the global overlap threshold. Pipeline picks it up on its
+    next refresh tick (≤2s)."""
+    setting = session.get(AppSetting, SETTING_IGNORE_OVERLAP_THRESHOLD)
+    if setting is None:
+        setting = AppSetting(
+            key=SETTING_IGNORE_OVERLAP_THRESHOLD,
+            value=str(body.overlap_threshold),
+        )
+        session.add(setting)
+    else:
+        setting.value = str(body.overlap_threshold)
+    session.commit()
+    return IgnoreSettings(overlap_threshold=body.overlap_threshold)
+
+
+@app.patch("/api/ignore-regions/{region_id}", response_model=IgnoreRegionResponse)
+def update_ignore_region(region_id: int, body: IgnoreRegionUpdate, session: SessionDep):
+    """Update any subset of a region's fields (label, coords, threshold,
+    enabled). Coordinates are validated together if any of them changes."""
+    region = session.get(IgnoreRegion, region_id)
+    if not region:
+        raise HTTPException(status_code=404, detail="Ignore region not found")
+
+    data = body.model_dump(exclude_unset=True)
+    for field in ("x1", "y1", "x2", "y2"):
+        if field in data:
+            setattr(region, field, data[field])
+    _validate_region_geometry(region.x1, region.y1, region.x2, region.y2)
+
+    if "label" in data and data["label"] is not None:
+        region.label = data["label"]
+    if "overlap_threshold" in data:
+        region.overlap_threshold = data["overlap_threshold"]
+    if "enabled" in data and data["enabled"] is not None:
+        region.enabled = data["enabled"]
+
+    session.commit()
+    session.refresh(region)
+    return region
+
+
+@app.delete("/api/ignore-regions/{region_id}", status_code=204)
+def delete_ignore_region(region_id: int, session: SessionDep):
+    """Permanently remove an ignore region."""
+    region = session.get(IgnoreRegion, region_id)
+    if not region:
+        raise HTTPException(status_code=404, detail="Ignore region not found")
+    session.delete(region)
+    session.commit()
+    return Response(status_code=204)
+
+
+# --- Camera snapshot ---
+
+
+_SNAPSHOT_PATH = _Path(__file__).resolve().parents[2] / "data" / "cache" / "latest_snapshot.jpg"
+
+
+@app.get("/api/camera/snapshot")
+def camera_snapshot():
+    """Serve the most recent rotated camera frame for the /regions UI.
+
+    The pipeline process atomically writes this file every ~1.5s; we just
+    stream it. 404s while the pipeline is warming up — the UI shows a
+    placeholder until the first frame arrives."""
+    if not _SNAPSHOT_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No camera frame yet — make sure the pipeline is running",
+        )
+    try:
+        data = _SNAPSHOT_PATH.read_bytes()
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"Snapshot read failed: {e}")
+    headers = {"Cache-Control": "no-store, max-age=0"}
+    return Response(content=data, media_type="image/jpeg", headers=headers)
 
 
 # --- Delete Detection ---

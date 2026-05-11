@@ -70,12 +70,46 @@ class BulkDeleteResponse(BaseModel):
 
 
 class IgnoreRegionResponse(BaseModel):
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+    id: int
     label: str
-    overlap_threshold: float
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    overlap_threshold: float | None = None
+    enabled: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class IgnoreRegionCreate(BaseModel):
+    label: str = ""
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    overlap_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    enabled: bool = True
+
+
+class IgnoreRegionUpdate(BaseModel):
+    label: str | None = None
+    x1: float | None = None
+    y1: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+    overlap_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    enabled: bool | None = None
+
+
+class IgnoreSettings(BaseModel):
+    overlap_threshold: float = Field(ge=0.0, le=1.0)
+
+
+class IgnoreSettingsUpdate(BaseModel):
+    overlap_threshold: float = Field(ge=0.0, le=1.0)
 
 
 class DetectionStats(BaseModel):

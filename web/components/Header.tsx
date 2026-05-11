@@ -5,12 +5,13 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { LogoMark, GrafanaIcon, HomeIcon, ReviewIcon, SweepIcon } from "./Logo";
+import { LogoMark, GrafanaIcon, HomeIcon, RegionsIcon, ReviewIcon, SweepIcon } from "./Logo";
 
 export function Header() {
   const pathname = usePathname() ?? "/dashboard";
   const isDashboard = pathname.startsWith("/dashboard") || pathname === "/";
   const isReview = pathname.startsWith("/review");
+  const isRegions = pathname.startsWith("/regions");
   const isSweep = pathname.startsWith("/sweep");
   const features = useQuery({
     queryKey: ["features"],
@@ -73,6 +74,15 @@ export function Header() {
           >
             <ReviewIcon size={18} />
             <span className="hidden sm:inline">Review</span>
+          </Link>
+          <Link
+            href="/regions"
+            data-active={isRegions}
+            aria-label="Regions"
+            className="nav-btn"
+          >
+            <RegionsIcon size={18} />
+            <span className="hidden sm:inline">Regions</span>
           </Link>
           {sweepEnabled ? (
             <Link

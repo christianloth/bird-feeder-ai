@@ -26,12 +26,21 @@ export default function SweepPage() {
   });
   const regionsQ = useQuery({
     queryKey: ["ignore-regions"],
-    queryFn: api.ignoreRegions,
+    queryFn: api.ignoreRegions.list,
+  });
+  const settingsQ = useQuery({
+    queryKey: ["ignore-regions", "settings"],
+    queryFn: api.ignoreRegions.settings,
   });
 
-  const regions = regionsQ.data ?? [];
+  // Only show enabled regions in sweep — disabled ones don't filter detections.
+  const regions = (regionsQ.data ?? []).filter((r) => r.enabled);
+  const globalThreshold = settingsQ.data?.overlap_threshold ?? 0.5;
   const [activeIdx, setActiveIdx] = useState(0);
   const region: IgnoreRegion | undefined = regions[activeIdx];
+  const effectiveThreshold = region
+    ? region.overlap_threshold ?? globalThreshold
+    : globalThreshold;
 
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -45,9 +54,9 @@ export default function SweepPage() {
       region_y1: region.y1,
       region_x2: region.x2,
       region_y2: region.y2,
-      region_overlap: region.overlap_threshold,
+      region_overlap: effectiveThreshold,
     };
-  }, [region]);
+  }, [region, effectiveThreshold]);
 
   const countQ = useQuery({
     queryKey: ["sweep-count", filterParams],
@@ -160,17 +169,20 @@ export default function SweepPage() {
     return (
       <PageShell>
         <Notice
-          title="No ignore regions configured."
+          title="No ignore regions yet."
           body={
             <>
-              Add one or more rectangles to{" "}
-              <code className="rounded bg-[var(--color-ink-700)] px-1.5 py-0.5 font-mono text-[0.78rem] text-[var(--color-cream-100)]">
-                bird_detection.ignore_regions
-              </code>{" "}
-              in <span className="font-mono">config/config.yaml</span> to start
-              sweeping. Each region is{" "}
-              <span className="font-mono">[x1, y1, x2, y2]</span> in rotated
-              frame coordinates ({FRAME_W}×{FRAME_H}).
+              Head over to{" "}
+              <Link
+                href="/regions"
+                className="font-mono text-[var(--color-ember-400)] underline-offset-4 hover:underline"
+              >
+                /regions
+              </Link>{" "}
+              to draw rectangles on the camera frame — anything inside an
+              enabled region gets filtered out before classification, and
+              shows up here for sweeping. Coordinates are in rotated frame
+              pixels ({FRAME_W}×{FRAME_H}).
             </>
           }
         />
@@ -208,7 +220,7 @@ export default function SweepPage() {
                 const active = i === activeIdx;
                 return (
                   <button
-                    key={`${r.x1}-${r.y1}-${r.x2}-${r.y2}`}
+                    key={r.id}
                     type="button"
                     onClick={() => setActiveIdx(i)}
                     data-active={active}
@@ -230,7 +242,7 @@ export default function SweepPage() {
                 <span>
                   <span className="eyebrow mr-2">match ≥</span>
                   <span className="font-mono text-[var(--color-cream-100)]">
-                    {Math.round(region.overlap_threshold * 100)}%
+                    {Math.round(effectiveThreshold * 100)}%
                   </span>
                 </span>
                 <span>

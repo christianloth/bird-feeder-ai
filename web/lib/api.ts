@@ -4,6 +4,9 @@ import type {
   DetectionStats,
   FeatureFlags,
   IgnoreRegion,
+  IgnoreRegionCreate,
+  IgnoreRegionUpdate,
+  IgnoreSettings,
   Species,
   SystemStatus,
   Weather,
@@ -78,7 +81,28 @@ export const api = {
 
   features: () => jsonFetch<FeatureFlags>("/api/features"),
 
-  ignoreRegions: () => jsonFetch<IgnoreRegion[]>("/api/ignore-regions"),
+  ignoreRegions: {
+    list: () => jsonFetch<IgnoreRegion[]>("/api/ignore-regions"),
+    create: (body: IgnoreRegionCreate) =>
+      jsonFetch<IgnoreRegion>("/api/ignore-regions", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    update: (id: number, body: IgnoreRegionUpdate) =>
+      jsonFetch<IgnoreRegion>(`/api/ignore-regions/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    remove: (id: number) =>
+      jsonFetch<unknown>(`/api/ignore-regions/${id}`, { method: "DELETE" }),
+    settings: () =>
+      jsonFetch<IgnoreSettings>("/api/ignore-regions/settings"),
+    updateSettings: (body: IgnoreSettings) =>
+      jsonFetch<IgnoreSettings>("/api/ignore-regions/settings", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+  },
 
   pendingCount: async (): Promise<{ pending: number; total: number }> => {
     const stats = await api.stats();
@@ -95,4 +119,8 @@ export const imageUrl = {
   crop: (id: number) => `/api/detections/${id}/crop`,
   frame: (id: number) => `/api/detections/${id}/frame`,
   annotated: (id: number) => `/api/detections/${id}/annotated`,
+  // Cache-busted snapshot for the /regions page so the browser refetches
+  // when the user hits the refresh button.
+  snapshot: (cacheBuster?: string | number) =>
+    `/api/camera/snapshot${cacheBuster !== undefined ? `?t=${cacheBuster}` : ""}`,
 };
