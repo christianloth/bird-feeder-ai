@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { DM_Sans, Fraunces, JetBrains_Mono } from "next/font/google";
 import { Providers } from "./providers";
 import { Header } from "@/components/Header";
+import { DebugClickLogger } from "@/components/DebugClickLogger";
 import "./globals.css";
 
 const display = Fraunces({
@@ -61,6 +62,7 @@ export default function RootLayout({
               <span className="font-mono opacity-70">v0.1 · pi5 · hailo-10h</span>
             </div>
           </footer>
+          <DebugClickLogger />
         </Providers>
       </body>
     </html>
