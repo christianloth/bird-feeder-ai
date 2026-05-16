@@ -632,9 +632,7 @@ class BirdPipeline:
             logger.info(f"  Initial mode: {self.mode_manager.mode.value}")
         logger.info(f"  Processing every {self.skipper.process_every_n} frames")
 
-        if not self.camera.start():
-            logger.critical("Failed to connect to camera. Pipeline cannot start.")
-            return
+        self.camera.start()
 
         frames_processed = 0
         last_status_time = time.time()

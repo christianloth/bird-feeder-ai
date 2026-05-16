@@ -194,17 +194,18 @@ class RTSPCamera:
                     self._running = False
                     break
 
+                if reconnect_attempts > 0:
+                    logger.warning(
+                        f"Reconnecting in {self.reconnect_delay}s "
+                        f"(attempt {reconnect_attempts + 1}/"
+                        f"{'unlimited' if self.max_reconnect_attempts == 0 else self.max_reconnect_attempts})"
+                    )
+                    time.sleep(self.reconnect_delay)
                 reconnect_attempts += 1
-                logger.warning(
-                    f"Reconnecting in {self.reconnect_delay}s "
-                    f"(attempt {reconnect_attempts}/"
-                    f"{'unlimited' if self.max_reconnect_attempts == 0 else self.max_reconnect_attempts})"
-                )
-                time.sleep(self.reconnect_delay)
 
                 if self.connect():
                     reconnect_attempts = 0
-                    logger.info("Reconnected to RTSP stream")
+                    logger.info("Connected to RTSP stream")
                 continue
 
             ret, frame = self._cap.read()
@@ -226,14 +227,17 @@ class RTSPCamera:
             self._cap = None
 
     def start(self) -> bool:
-        """Start capturing frames in a background thread."""
+        """Start the capture thread.
+
+        Always returns True: the grab thread owns (re)connection so the
+        pipeline can start even when the camera is offline and will pick
+        up frames once it becomes reachable.
+        """
         if self._running:
             logger.warning("Camera is already running.")
             return True
 
-        if not self.connect():
-            return False
-
+        self._connected = False
         self._running = True
         self._thread = threading.Thread(target=self._grab_loop, daemon=True, name="rtsp-capture")
         self._thread.start()
