@@ -1073,6 +1073,7 @@ def create_pipeline_hailo(
         wildlife_detector=wildlife_detector,
         mode_manager=mode_manager,
         save_enabled=save_enabled,
+        process_every_n=settings.process_every_n,
     )
 
 
