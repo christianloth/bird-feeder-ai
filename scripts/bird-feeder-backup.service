@@ -1,0 +1,11 @@
+[Unit]
+Description=Bird Feeder Dropbox Backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+ExecStart=/home/pi/Repos/bird-feeder-ai/scripts/backup_dropbox.sh
+StandardOutput=journal
+StandardError=journal
