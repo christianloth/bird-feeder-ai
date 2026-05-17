@@ -30,6 +30,7 @@ from src.backend.database import (
     load_species_from_dataset,
     load_wildlife_species,
     migrate_detection_detector_confidence,
+    migrate_ignore_regions_frame_size,
     migrate_species_category,
     migrate_species_nabirds_id,
     seed_ignore_regions_from_config,
@@ -91,7 +92,7 @@ class BirdPipeline:
         # process from the API, so we re-read both regions and the global
         # overlap threshold every `_ignore_refresh_seconds` of wall-clock
         # time. SQLite reads of a few rows are essentially free.
-        self._ignore_regions_cache: list[tuple[int, int, int, int]] = []
+        self._ignore_regions_cache: list[tuple[float, float, float, float, int | None, int | None]] = []
         self._ignore_threshold_cache: float = settings.ignore_overlap_threshold
         self._ignore_last_refresh: float = 0.0
         self._ignore_refresh_seconds: float = 2.0
@@ -144,6 +145,7 @@ class BirdPipeline:
         migrate_species_category(engine)
         migrate_species_nabirds_id(engine)
         migrate_detection_detector_confidence(engine)
+        migrate_ignore_regions_frame_size(engine)
         seed_ignore_regions_from_config(engine)
         self._session_factory = get_session_factory(engine)
 
@@ -300,7 +302,8 @@ class BirdPipeline:
                     IgnoreRegion.enabled.is_(True)
                 ).all()
                 self._ignore_regions_cache = [
-                    (int(r.x1), int(r.y1), int(r.x2), int(r.y2)) for r in rows
+                    (r.x1, r.y1, r.x2, r.y2, r.frame_width, r.frame_height)
+                    for r in rows
                 ]
                 setting = session.get(AppSetting, SETTING_IGNORE_OVERLAP_THRESHOLD)
                 if setting is not None:
@@ -342,18 +345,25 @@ class BirdPipeline:
         self,
         bboxes: list[tuple[int, int, int, int]],
         confidences: list[float],
+        frame_shape: tuple[int, int],
     ) -> tuple[list[tuple[int, int, int, int]], list[float]]:
         """Drop detections that overlap a configured ignore region.
 
         A detection is dropped if (intersection_area / detection_area) is
         >= the global overlap threshold for any enabled ignore region.
         Regions and threshold come from the DB (managed via /regions UI).
+
+        Region coordinates are scaled proportionally from the resolution they
+        were drawn at (frame_width × frame_height) to the current frame size,
+        so regions stay pinned to the same spot in the image across resolution
+        changes.
         """
         self._refresh_ignore_cache()
         regions = self._ignore_regions_cache
         if not regions:
             return bboxes, confidences
 
+        frame_h, frame_w = frame_shape
         threshold = self._ignore_threshold_cache
         kept_bboxes: list[tuple[int, int, int, int]] = []
         kept_confs: list[float] = []
@@ -366,7 +376,11 @@ class BirdPipeline:
                 continue
 
             suppressed = False
-            for rx1, ry1, rx2, ry2 in regions:
+            for rx1, ry1, rx2, ry2, ref_w, ref_h in regions:
+                if ref_w and ref_h and (ref_w != frame_w or ref_h != frame_h):
+                    sx = frame_w / ref_w
+                    sy = frame_h / ref_h
+                    rx1, ry1, rx2, ry2 = rx1 * sx, ry1 * sy, rx2 * sx, ry2 * sy
                 ix1 = max(x1, rx1)
                 iy1 = max(y1, ry1)
                 ix2 = min(x2, rx2)
@@ -376,7 +390,7 @@ class BirdPipeline:
                     logger.info(
                         f"Suppressed detection {bbox} (conf={conf:.2f}) — "
                         f"{inter/det_area:.0%} inside ignore region "
-                        f"({rx1},{ry1},{rx2},{ry2})"
+                        f"({rx1:.0f},{ry1:.0f},{rx2:.0f},{ry2:.0f})"
                     )
                     suppressed = True
                     break
@@ -447,7 +461,7 @@ class BirdPipeline:
         else:
             logger.debug(f"Detection: 0 birds in {det_ms:.1f}ms")
 
-        bboxes, confidences = self._filter_ignored_regions(bboxes, confidences)
+        bboxes, confidences = self._filter_ignored_regions(bboxes, confidences, frame.shape[:2])
 
         # 2. Update tracker — returns all active tracks not yet confidently
         #    classified (both new tracks and existing ones being retried)
@@ -546,7 +560,7 @@ class BirdPipeline:
         if self._ignore_regions_cache:
             bboxes_in = [d.bbox for d in wildlife_dets]
             confs_in = [d.confidence for d in wildlife_dets]
-            kept_bboxes, _ = self._filter_ignored_regions(bboxes_in, confs_in)
+            kept_bboxes, _ = self._filter_ignored_regions(bboxes_in, confs_in, frame.shape[:2])
             kept_set = {tuple(b) for b in kept_bboxes}
             wildlife_dets = [d for d in wildlife_dets if tuple(d.bbox) in kept_set]
 

@@ -76,6 +76,8 @@ class IgnoreRegionResponse(BaseModel):
     y1: float
     x2: float
     y2: float
+    frame_width: int | None = None
+    frame_height: int | None = None
     overlap_threshold: float | None = None
     enabled: bool = True
     created_at: datetime
@@ -90,6 +92,8 @@ class IgnoreRegionCreate(BaseModel):
     y1: float
     x2: float
     y2: float
+    frame_width: int | None = None
+    frame_height: int | None = None
     overlap_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enabled: bool = True
 
@@ -100,6 +104,8 @@ class IgnoreRegionUpdate(BaseModel):
     y1: float | None = None
     x2: float | None = None
     y2: float | None = None
+    frame_width: int | None = None
+    frame_height: int | None = None
     overlap_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enabled: bool | None = None
 

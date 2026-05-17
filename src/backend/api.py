@@ -33,6 +33,7 @@ from src.backend.database import (
     get_session_factory,
     load_wildlife_species,
     migrate_species_category,
+    migrate_ignore_regions_frame_size,
     seed_ignore_regions_from_config,
 )
 from src.backend.schemas import (
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI):
     _engine = get_engine()
     create_tables(_engine)
     migrate_species_category(_engine)
+    migrate_ignore_regions_frame_size(_engine)
     seed_ignore_regions_from_config(_engine)
     _session_factory = get_session_factory(_engine)
 
@@ -698,6 +700,8 @@ def create_ignore_region(body: IgnoreRegionCreate, session: SessionDep):
         y1=body.y1,
         x2=body.x2,
         y2=body.y2,
+        frame_width=body.frame_width,
+        frame_height=body.frame_height,
         overlap_threshold=body.overlap_threshold,
         enabled=body.enabled,
     )
@@ -749,7 +753,7 @@ def update_ignore_region(region_id: int, body: IgnoreRegionUpdate, session: Sess
         raise HTTPException(status_code=404, detail="Ignore region not found")
 
     data = body.model_dump(exclude_unset=True)
-    for field in ("x1", "y1", "x2", "y2"):
+    for field in ("x1", "y1", "x2", "y2", "frame_width", "frame_height"):
         if field in data:
             setattr(region, field, data[field])
     _validate_region_geometry(region.x1, region.y1, region.x2, region.y2)

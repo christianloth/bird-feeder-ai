@@ -34,7 +34,12 @@ export default function RegionsPage() {
   // ── Mutations ────────────────────────────────────────────────────────
   const createRegion = useMutation({
     mutationFn: (rect: DraftRect) =>
-      api.ignoreRegions.create({ ...rect, label: "" }),
+      api.ignoreRegions.create({
+        ...rect,
+        label: "",
+        frame_width: imgSize?.w ?? null,
+        frame_height: imgSize?.h ?? null,
+      }),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["ignore-regions"] });
       setSelectedId(created.id);
@@ -85,7 +90,12 @@ export default function RegionsPage() {
     if (existing) window.clearTimeout(existing);
     const handle = window.setTimeout(() => {
       patchTimers.current.delete(id);
-      updateRegion.mutate({ id, ...rect });
+      updateRegion.mutate({
+        id,
+        ...rect,
+        frame_width: imgSize?.w ?? null,
+        frame_height: imgSize?.h ?? null,
+      });
     }, 80); // small debounce so we don't spam the API mid-drag
     patchTimers.current.set(id, handle);
   };

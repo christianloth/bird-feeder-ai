@@ -79,6 +79,8 @@ export interface IgnoreRegion {
   y1: number;
   x2: number;
   y2: number;
+  frame_width: number | null;
+  frame_height: number | null;
   overlap_threshold: number | null;
   enabled: boolean;
   created_at: string;
@@ -91,6 +93,8 @@ export interface IgnoreRegionCreate {
   y1: number;
   x2: number;
   y2: number;
+  frame_width?: number | null;
+  frame_height?: number | null;
   overlap_threshold?: number | null;
   enabled?: boolean;
 }
@@ -101,6 +105,8 @@ export interface IgnoreRegionUpdate {
   y1?: number;
   x2?: number;
   y2?: number;
+  frame_width?: number | null;
+  frame_height?: number | null;
   overlap_threshold?: number | null;
   enabled?: boolean;
 }

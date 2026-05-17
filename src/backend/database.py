@@ -111,7 +111,12 @@ class IgnoreRegion(Base):
     previously lived in config.yaml — managed via the /regions web UI.
 
     Coordinates are stored as floats so the UI can persist sub-pixel edits
-    cleanly, but the pipeline rounds to ints when filtering."""
+    cleanly, but the pipeline rounds to ints when filtering.
+
+    frame_width/frame_height record the resolution of the frame the region
+    was drawn on. The pipeline scales coordinates proportionally when the
+    live frame dimensions differ, so regions stay pinned to the same spot
+    in the image regardless of resolution changes."""
 
     __tablename__ = "ignore_regions"
 
@@ -121,6 +126,8 @@ class IgnoreRegion(Base):
     y1: Mapped[float] = mapped_column(Float, nullable=False)
     x2: Mapped[float] = mapped_column(Float, nullable=False)
     y2: Mapped[float] = mapped_column(Float, nullable=False)
+    frame_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    frame_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Per-region override. NULL ⇒ use the global threshold from app_settings.
     overlap_threshold: Mapped[float | None] = mapped_column(Float)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
@@ -305,6 +312,26 @@ def migrate_detection_detector_confidence(engine) -> None:
             conn.execute(text("ALTER TABLE detections ADD COLUMN detector_confidence FLOAT"))
 
 
+def migrate_ignore_regions_frame_size(engine) -> None:
+    """Add frame_width/frame_height columns to ignore_regions if missing.
+
+    Backfills existing rows with 1080×1920 (the rotated 1080p frame that was
+    the only resolution used before this migration was introduced). Safe to
+    call repeatedly.
+    """
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("ignore_regions")]
+    with engine.begin() as conn:
+        if "frame_width" not in columns:
+            conn.execute(text("ALTER TABLE ignore_regions ADD COLUMN frame_width INTEGER"))
+        if "frame_height" not in columns:
+            conn.execute(text("ALTER TABLE ignore_regions ADD COLUMN frame_height INTEGER"))
+        conn.execute(text(
+            "UPDATE ignore_regions SET frame_width = 1080, frame_height = 1920 "
+            "WHERE frame_width IS NULL"
+        ))
+
+
 def seed_ignore_regions_from_config(engine) -> None:
     """One-time import: copy regions + threshold from config.yaml into the DB.
 
@@ -325,6 +352,8 @@ def seed_ignore_regions_from_config(engine) -> None:
                     y1=float(y1),
                     x2=float(x2),
                     y2=float(y2),
+                    frame_width=1080,
+                    frame_height=1920,
                     overlap_threshold=None,
                     enabled=True,
                 ))
