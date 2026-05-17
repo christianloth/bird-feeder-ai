@@ -54,6 +54,9 @@ data/
 /mediamtx/videos/*
 !/mediamtx/videos/.gitkeep
 
+# Application logs
+/logs/
+
 # Runtime pidfiles (created by scripts/start_*.sh)
 /run/
 

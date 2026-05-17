@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_DIR="$ROOT_DIR/run"
-LOG_FILE="$ROOT_DIR/backend.log"
+LOG_FILE="$ROOT_DIR/logs/backend.log"
 PID_FILE="$RUN_DIR/backend.pid"
 
 mkdir -p "$RUN_DIR"

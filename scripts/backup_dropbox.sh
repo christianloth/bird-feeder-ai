@@ -26,6 +26,14 @@ log "Syncing detection images..."
 rclone copy "${DETECTIONS_SRC}" "${REMOTE}/detections" \
     --checksum \
     --transfers 4 \
+    --exclude ".DS_Store" \
+    --log-level INFO
+
+# Sync rotated (compressed) log archives — skip the live .log files
+log "Syncing log archives..."
+rclone copy "${PROJECT_DIR}/logs" "${REMOTE}/logs" \
+    --include "*.log-*.gz" \
+    --checksum \
     --log-level INFO
 
 # Back up the rclone config and this script itself

@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_DIR="$ROOT_DIR/run"
-LOG_FILE="$ROOT_DIR/pipeline.log"
+LOG_FILE="$ROOT_DIR/logs/pipeline.log"
 PID_FILE="$RUN_DIR/pipeline.pid"
 
 mkdir -p "$RUN_DIR"
