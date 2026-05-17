@@ -122,12 +122,13 @@ function DashboardInner() {
   );
   const speciesList = speciesQ.data ?? [];
 
-  // Fall back to a single-detection fetch when the deep-linked id isn't on
-  // the current page (e.g. a shared link to an older detection).
+  // Always fetch the single-detection endpoint when a modal is open: it carries
+  // fields the list omits (e.g. crop_width / crop_height). Falls back to the
+  // list row until the fetch resolves so the modal opens instantly.
   const singleQ = useQuery({
     queryKey: ["detection", viewingId],
     queryFn: () => api.detection(viewingId!),
-    enabled: viewingId !== null && !detections.some((d) => d.id === viewingId),
+    enabled: viewingId !== null,
   });
 
   // URL → state. Runs on initial deep link, browser back/forward, and any
@@ -146,8 +147,10 @@ function DashboardInner() {
       return;
     }
     if (dismissedIdsRef.current.has(viewingId)) return;
+    // Prefer singleQ.data once available — it includes crop dims missing from
+    // the list response. Fall back to the list row for instant open.
     const found =
-      detections.find((d) => d.id === viewingId) ?? singleQ.data ?? null;
+      singleQ.data ?? detections.find((d) => d.id === viewingId) ?? null;
     if (found) setViewing(found);
   }, [viewingId, detections, singleQ.data]);
 
@@ -317,6 +320,12 @@ function DashboardInner() {
                   <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">SPECIES</span>
                   {formatPct(viewing.confidence)}
                 </div>
+                {viewing.crop_width != null && viewing.crop_height != null && (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
+                    <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">CROP</span>
+                    {viewing.crop_width}×{viewing.crop_height} → 224×224
+                  </div>
+                )}
               </div>
             </div>
           </div>

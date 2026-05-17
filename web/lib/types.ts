@@ -19,6 +19,8 @@ export interface Detection {
   bbox_y1: number | null;
   bbox_x2: number | null;
   bbox_y2: number | null;
+  crop_width: number | null;
+  crop_height: number | null;
   frame_path: string | null;
   reviewed: boolean;
   is_false_positive: boolean;

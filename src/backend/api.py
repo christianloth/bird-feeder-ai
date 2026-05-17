@@ -337,6 +337,30 @@ def get_detection(detection_id: int, session: SessionDep):
     resp.species_name = detection.species.common_name if detection.species else None
     if detection.corrected_species:
         resp.corrected_species_name = detection.corrected_species.common_name
+
+    # Compute the padded+clamped crop dimensions fed to the classifier (matches
+    # crop_bird_roi / ImageStorage.crop_from_frame: 20px padding, clamped to frame).
+    if (
+        detection.frame_path
+        and detection.bbox_x1 is not None
+        and detection.bbox_y1 is not None
+        and detection.bbox_x2 is not None
+        and detection.bbox_y2 is not None
+    ):
+        frame_path = _image_storage.get_absolute_path(detection.frame_path)
+        if frame_path.exists():
+            try:
+                with Image.open(frame_path) as img:
+                    fw, fh = img.size
+                padding = 20
+                cx1 = max(0, int(detection.bbox_x1) - padding)
+                cy1 = max(0, int(detection.bbox_y1) - padding)
+                cx2 = min(fw, int(detection.bbox_x2) + padding)
+                cy2 = min(fh, int(detection.bbox_y2) + padding)
+                resp.crop_width = max(0, cx2 - cx1)
+                resp.crop_height = max(0, cy2 - cy1)
+            except Exception as e:
+                logger.debug(f"Could not read frame dims for detection {detection_id}: {e}")
     return resp
 
 

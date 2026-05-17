@@ -45,6 +45,8 @@ class DetectionResponse(BaseModel):
     bbox_y1: float | None = None
     bbox_x2: float | None = None
     bbox_y2: float | None = None
+    crop_width: int | None = None   # Padded+clamped crop W (pre-resize) fed to ViT
+    crop_height: int | None = None  # Padded+clamped crop H (pre-resize) fed to ViT
     frame_path: str | None = None
     reviewed: bool = False
     is_false_positive: bool = False
