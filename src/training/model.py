@@ -1,5 +1,5 @@
 """
-YOUR CODE: Transfer Learning with ViT-Small / ViT-Base / EfficientNet-Lite4
+YOUR CODE: Transfer Learning with ViT-Small / ViT-Base
 
 Transfer learning is the key insight that makes this project feasible:
 instead of training a model from scratch (which would need millions of images),
@@ -38,28 +38,11 @@ SUPPORTED MODELS:
     top-1 on ImageNet-1K at 57 FPS (single pass) on Hailo10H.
     Training strategy: same as ViT-Small (low LR, end-to-end).
 
-  EfficientNet-Lite4 ARCHITECTURE (runner-up — CNN alternative):
-    Input (3, 300, 300)
-        → features (backbone): compound-scaled blocks with ReLU6 (no SE blocks) → (1280, 10, 10)
-        → avgpool: (1280, 10, 10) → (1280,)
-        → classifier (head): Linear(1280, 1000)  ← WE REPLACE THIS
-
-    Medium (13.0M params), 300x300 resolution captures fine plumage detail.
-    Hardware-friendly: no squeeze-and-excitation blocks, ReLU6 instead of swish.
-    Runs in a single pass on Hailo-10H NPU (confirmed in Hailo Model Zoo).
-    Training strategy: SINGLE-PHASE end-to-end.
-
 WHY ViT-Small? (primary)
 - Self-attention excels at fine-grained classification (TransFG, AAAI 2022)
 - Multi-head attention naturally discovers discriminative bird body parts
 - 80.5% HW accuracy on Hailo-10H at 116 FPS (single pass, confirmed)
 - Validated on NABirds — the exact dataset this project uses
-
-WHY EfficientNet-Lite4? (runner-up)
-- CNN with different error profile vs ViT (complementary strengths)
-- 300x300 resolution — more pixels on fine plumage details
-- 80.1% HW accuracy on Hailo-10H at 137 FPS (single pass, confirmed)
-- Designed for edge accelerators — no SE blocks that cause multi-pass issues
 
 DOCS:
 - https://huggingface.co/timm/vit_small_patch16_224.augreg_in21k_ft_in1k
@@ -84,12 +67,6 @@ MODEL_CONFIGS: dict[str, dict] = {
         "feature_dim": 768,
         "dropout": 0.1,
         "timm_model": "vit_base_patch16_224.augreg_in21k_ft_in1k",
-    },
-    "efficientnet_lite4": {
-        "input_size": 300,
-        "feature_dim": 1280,
-        "dropout": 0.3,
-        "timm_model": "tf_efficientnet_lite4.in1k",
     },
 }
 
@@ -116,7 +93,7 @@ def create_model(
         num_classes: Number of bird species (555 for NABirds)
         pretrained: Load ImageNet pretrained weights (via timm)
         freeze_backbone: If True, freeze the feature extraction layers
-        model_name: Which architecture — "vit_small", "vit_base", or "efficientnet_lite4"
+        model_name: Which architecture — "vit_small" or "vit_base"
 
     Returns:
         Modified model with new classifier head
@@ -136,8 +113,8 @@ def create_model(
     # Optionally freeze backbone (everything except the classifier head)
     if freeze_backbone:
         for name, param in model.named_parameters():
-            # timm uses "head" for the classifier in both ViT and EfficientNet
-            if "head" not in name and "classifier" not in name:
+            # timm uses "head" for the classifier in ViT
+            if "head" not in name:
                 param.requires_grad = False
 
     # Store model name for downstream use

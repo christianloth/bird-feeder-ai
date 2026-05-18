@@ -36,7 +36,7 @@ SOFTWARE SETUP:
 
 USAGE:
   # Export ONNX on your Mac/dev machine first:
-  python -m src.training.export_onnx classifier --model vit_small   # or vit_base / efficientnet_lite4
+  python -m src.training.export_onnx classifier --model vit_small   # or vit_base
 
   # Copy to the Linux box:
   scp models/onnx/vit_small_birds.onnx user@linux-box:/path/to/project/
@@ -84,10 +84,6 @@ MODEL_CONFIGS = {
     "vit_base": {
         "input_size": 224,
         "hef_name": "vit_base_birds",
-    },
-    "efficientnet_lite4": {
-        "input_size": 300,
-        "hef_name": "efficientnet_lite4_birds",
     },
 }
 
@@ -211,11 +207,6 @@ resources_param(strategy=greedy, max_compute_utilization=0.8, max_control_utiliz
 """
 
 
-def get_model_script_efficientnet_lite4() -> str:
-    """EfficientNet-Lite4 model script — simple normalization, standard INT8."""
-    return "normalization1 = normalization([127.5, 127.5, 127.5], [127.5, 127.5, 127.5])\n"
-
-
 def convert(
     model: str,
     onnx_path: Path,
@@ -226,7 +217,7 @@ def convert(
     """Full ONNX -> HEF conversion pipeline.
 
     Args:
-        model: Either "vit_small" or "efficientnet_lite4".
+        model: Either "vit_small" or "vit_base".
         onnx_path: Path to the exported ONNX model.
         calib_dir: Directory of calibration images (NABirds dataset).
         output_dir: Where to write intermediate HARs and the final HEF.
@@ -267,12 +258,9 @@ def convert(
     if model == "vit_small":
         logger.info("Stage 2: Loading ViT-Small .alls (mixed-precision a16_w16 for attention)")
         model_script = get_model_script_vit_small(hef_name)
-    elif model == "vit_base":
+    else:
         logger.info("Stage 2: Loading ViT-Base .alls (mixed-precision a16_w16 for attention)")
         model_script = get_model_script_vit_base(hef_name)
-    else:
-        logger.info("Stage 2: Loading EfficientNet-Lite4 .alls (standard INT8)")
-        model_script = get_model_script_efficientnet_lite4()
     runner.load_model_script(model_script)
 
     # Stage 3: Load calibration data

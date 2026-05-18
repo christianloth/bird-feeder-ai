@@ -14,9 +14,8 @@ WHAT TO LEARN:
 - All pipelines must end with ToTensor() and Normalize()
 
 MODEL INPUT SIZES:
-- ViT-Small: 224x224 pixels
-- EfficientNet-Lite4: 300x300 pixels
-- The input_size parameter controls this — defaults to 224 (ViT-Small)
+- ViT-Small / ViT-Base: 224x224 pixels
+- The input_size parameter controls this — defaults to 224
 
 NORMALIZATION (same for both models — both pretrained on ImageNet):
 - Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
@@ -50,14 +49,14 @@ DOCS: https://pytorch.org/vision/stable/transforms.html
 from torchvision import transforms
 
 
-# Normalization values for both ViT-Small and EfficientNet-Lite4.
-# Both timm models (vit_small_patch16_224.augreg_in21k_ft_in1k and
-# tf_efficientnet_lite4.in1k) were pretrained with mean=0.5, std=0.5,
-# which maps pixel values from [0,1] to [-1,1].
-# This also matches the Hailo Model Zoo .alls scripts: [127.5]/[127.5] on 0-255 scale.
+# Normalization values for ViT-Small / ViT-Base. Both timm models
+# (vit_small_patch16_224.augreg_in21k_ft_in1k and the ViT-Base counterpart)
+# were pretrained with mean=0.5, std=0.5, which maps pixel values from
+# [0,1] to [-1,1]. This also matches the Hailo Model Zoo .alls scripts:
+# [127.5]/[127.5] on 0-255 scale.
 IMAGENET_MEAN = [0.5, 0.5, 0.5]
 IMAGENET_STD = [0.5, 0.5, 0.5]
-DEFAULT_INPUT_SIZE = 224  # ViT-Small=224, EfficientNet-Lite4=300
+DEFAULT_INPUT_SIZE = 224
 
 
 def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compose:
@@ -65,7 +64,7 @@ def get_train_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Com
     Training transforms with data augmentation.
 
     Args:
-        input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
+        input_size: Model input resolution (224 for ViT-Small/ViT-Base)
 
     Pipeline:
     1. RandomResizedCrop(input_size) — crop random region and resize to input_size x input_size
@@ -100,7 +99,7 @@ def get_val_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms.Compo
     Validation/test transforms — NO randomness.
 
     Args:
-        input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
+        input_size: Model input resolution (224 for ViT-Small/ViT-Base)
 
     Pipeline:
     1. Resize((input_size, input_size)) — direct resize to square, no center crop
@@ -133,6 +132,6 @@ def get_inference_transforms(input_size: int = DEFAULT_INPUT_SIZE) -> transforms
     Used when classifying birds from camera crops.
 
     Args:
-        input_size: Model input resolution (224 for ViT-Small, 300 for EfficientNet-Lite4)
+        input_size: Model input resolution (224 for ViT-Small/ViT-Base)
     """
     return get_val_transforms(input_size)

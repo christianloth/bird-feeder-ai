@@ -343,7 +343,7 @@ def train(
     Args:
         scheduler_type: "step_lr" (reduce every 7 epochs)
                         or "reduce_on_plateau" (reduce when val acc stalls — recommended
-                        for both ViT-Small and EfficientNet-Lite4)
+                        for ViT-Small / ViT-Base)
         patience: Early stopping patience. If val accuracy doesn't improve for this many
                   epochs, stop training. None = no early stopping.
 
@@ -524,15 +524,14 @@ if __name__ == "__main__":
     #     python scripts/preprocess_dataset.py
     #     python -m src.training.train --batch-size 176 --preprocessed data/nabirds/preprocessed
     #
-    # TRAINING STRATEGY (both models use single-phase end-to-end):
+    # TRAINING STRATEGY (single-phase end-to-end):
     #
-    # Both ViT-Small and EfficientNet-Lite4 train end-to-end in a single phase.
-    # The pretrained backbone adapts its features specifically for bird species
-    # while the new classifier head learns to map features to 555 species.
+    # ViT-Small / ViT-Base train end-to-end in a single phase. The pretrained
+    # backbone adapts its features specifically for bird species while the new
+    # classifier head learns to map features to 555 species.
     #
-    # ViT-Small uses a lower learning rate (1e-4) because transformer
-    # self-attention layers are sensitive to large gradient updates.
-    # EfficientNet-Lite4 uses standard LR (1e-3) since CNNs are more robust.
+    # Lower learning rate (1e-4) is required because transformer self-attention
+    # layers are sensitive to large gradient updates.
     #
     # After training, the model undergoes "catastrophic forgetting" —
     # it can no longer classify "school bus" or "pizza", but it CAN distinguish
@@ -550,7 +549,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train bird species classifier")
     parser.add_argument(
         "--model", type=str, default="vit_small",
-        choices=["vit_small", "vit_base", "efficientnet_lite4"],
+        choices=["vit_small", "vit_base"],
         help="model architecture (default: vit_small)",
     )
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
@@ -565,10 +564,6 @@ if __name__ == "__main__":
         help="resume training from checkpoint.pth (keeps optimizer/scheduler state)",
     )
     args = parser.parse_args()
-
-    # Preprocessed data is baked at 224x224 — works with any 224-input model (ViT-Small/ViT-Base)
-    if args.preprocessed and args.model not in ("vit_small", "vit_base"):
-        parser.error("--preprocessed requires a 224x224 model (vit_small or vit_base)")
 
     # Look up model-specific config (input size, etc.)
     model_config = get_model_config(args.model)
@@ -644,15 +639,9 @@ if __name__ == "__main__":
 
     # --- Training strategy ---
     #
-    # All architectures use single-phase end-to-end training.
-    #
-    # ViT-Small / ViT-Base: Lower learning rate (1e-4) with ReduceLROnPlateau.
-    #   ViTs are sensitive to high initial LR — warmup prevents early divergence.
-    #   ReduceLROnPlateau adapts when val accuracy stalls.
-    #
-    # EfficientNet-Lite4: Standard LR (1e-3) with ReduceLROnPlateau.
-    #   CNNs are more robust to higher LR. Same single-phase strategy.
-    #
+    # ViT-Small / ViT-Base use single-phase end-to-end training.
+    # Lower learning rate (1e-4) with ReduceLROnPlateau — ViTs are sensitive to
+    # high initial LR; ReduceLROnPlateau adapts when val accuracy stalls.
 
     # Resolve --resume checkpoint path
     resume_path = (SAVE_DIR / "checkpoint.pth") if args.resume else None
@@ -695,27 +684,6 @@ if __name__ == "__main__":
         combined_history = train(
             model, train_loader, val_loader,
             num_epochs=30, learning_rate=0.0001, save_dir=SAVE_DIR,
-            class_names=class_names, use_amp=args.amp,
-            resume_from=resume_path,
-            scheduler_type="reduce_on_plateau",
-            patience=5,
-        )
-
-    elif args.model == "efficientnet_lite4":
-        # --- EfficientNet-Lite4: end-to-end with standard LR ---
-        # Hardware-friendly CNN (no SE blocks, ReLU6 instead of swish).
-        # Runs in a single pass on Hailo-10H NPU.
-        print("\n=== Training EfficientNet-Lite4 end-to-end ===")
-        model = create_model(
-            num_classes=train_dataset.num_classes, pretrained=True,
-            freeze_backbone=False, model_name="efficientnet_lite4",
-        )
-        params = count_parameters(model)
-        print(f"  Trainable: {params['trainable']:,} / {params['total']:,} parameters")
-
-        combined_history = train(
-            model, train_loader, val_loader,
-            num_epochs=30, learning_rate=0.001, save_dir=SAVE_DIR,
             class_names=class_names, use_amp=args.amp,
             resume_from=resume_path,
             scheduler_type="reduce_on_plateau",

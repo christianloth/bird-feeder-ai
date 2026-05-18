@@ -1,7 +1,7 @@
 """
 Bird species classifier supporting multiple backends.
 
-Runs a fine-tuned model (ViT-Small or EfficientNet-Lite4) on cropped bird images. Supports:
+Runs a fine-tuned model (ViT-Small or ViT-Base) on cropped bird images. Supports:
 - PyTorch (MPS/CUDA/CPU) — for Mac development and GPU servers
 - ONNX Runtime — cross-platform, optimized inference
 - Hailo NPU — Raspberry Pi AI HAT+ production deployment
