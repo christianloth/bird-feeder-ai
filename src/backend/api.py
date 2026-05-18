@@ -915,8 +915,6 @@ def get_system_status(session: SessionDep):
     uptime = (datetime.now() - _start_time).total_seconds() if _start_time else 0
 
     return SystemStatus(
-        camera_connected=False,  # Updated when pipeline is integrated
-        pipeline_running=False,  # Updated when pipeline is integrated
         total_detections=total,
         disk_usage_mb=round(disk_mb, 2),
         uptime_seconds=round(uptime, 1),

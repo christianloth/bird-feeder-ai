@@ -159,8 +159,6 @@ class DailySummaryResponse(BaseModel):
 # --- System ---
 
 class SystemStatus(BaseModel):
-    camera_connected: bool = False
-    pipeline_running: bool = False
     total_detections: int = 0
     disk_usage_mb: float = 0.0
     uptime_seconds: float = 0.0
