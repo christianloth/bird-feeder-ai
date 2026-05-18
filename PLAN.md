@@ -21,7 +21,7 @@ SV3C Camera (RTSP 1080p)
        |
 [Crop Bird ROI]
        |
-[MobileNetV2 - Species Classification] ── Hailo NPU (fine-tuned on NABirds)
+[ViT-Small - Species Classification] ── Hailo NPU (fine-tuned on NABirds)
        |
 [FastAPI Backend]
   ├── SQLite Database (detections, species, weather)
@@ -44,13 +44,13 @@ SV3C Camera (RTSP 1080p)
 | 1.3 | Write the PyTorch Dataset class | You | **Core learning.** You need to understand how PyTorch loads data — `__init__`, `__len__`, `__getitem__`, image loading, label mapping |
 | 1.4 | Write data augmentation transforms | You | **Core learning.** Understand why augmentation prevents overfitting — RandomHorizontalFlip, RandomRotation, ColorJitter, Normalize. Learn torchvision.transforms |
 | 1.5 | Write the DataLoader setup | You | Learn batch sizes, shuffling, num_workers, train/val/test splits |
-| 1.6 | Write the transfer learning model setup | You | **Core learning.** Load pretrained MobileNetV2, freeze backbone, replace final classifier head. Understand what freezing layers means and why |
+| 1.6 | Write the transfer learning model setup | You | **Core learning.** Load pretrained ViT-Small, freeze backbone, replace the classifier head. Understand what freezing layers means and why |
 | 1.7 | Write the training loop | You | **THE most important step.** Forward pass, loss computation (CrossEntropyLoss), backward pass, optimizer.step(), learning rate scheduling. This is the heart of PyTorch |
 | 1.8 | Write the evaluation/metrics code | You | Accuracy, precision, recall, confusion matrix, per-species accuracy. Understand what these metrics mean |
 | 1.9 | Experiment: unfreeze backbone, lower LR, retrain | You | Learn fine-tuning vs feature extraction. See how unfreezing improves accuracy |
 | 1.10 | Export trained model to ONNX | Claude + You | Semi-mechanical, but you should understand the export signature |
 
-**Deliverables:** A trained MobileNetV2 bird classifier in ONNX format, and solid PyTorch fundamentals.
+**Deliverables:** A trained ViT-Small bird classifier in ONNX format, and solid PyTorch fundamentals.
 
 ### Phase 2: Edge Deployment (Hailo NPU)
 > **Goal:** Learn model quantization and edge deployment.
@@ -62,7 +62,7 @@ SV3C Camera (RTSP 1080p)
 | 2.3 | Validate HEF accuracy vs original | You | Compare INT8 quantized accuracy against your FP32 model. Understand the accuracy/speed tradeoff |
 | 2.4 | Download pre-compiled YOLOv8n HEF from Hailo Model Zoo | Claude | Detection model — no need to train, COCO already has "bird" class |
 
-**Deliverables:** YOLOv8n HEF (detection) + MobileNetV2 HEF (classification) ready for Hailo NPU.
+**Deliverables:** YOLOv8n HEF (detection) + ViT-Small HEF (classification) ready for Hailo NPU.
 
 ### Phase 3: RTSP Pipeline & Detection
 > **Goal:** Build the real-time capture and inference pipeline.
@@ -154,13 +154,13 @@ bird-feeder-ai/
 │   ├── training/
 │   │   ├── dataset.py               # YOU WRITE: PyTorch Dataset class
 │   │   ├── transforms.py            # YOU WRITE: Data augmentation
-│   │   ├── model.py                 # YOU WRITE: MobileNetV2 transfer learning setup
+│   │   ├── model.py                 # YOU WRITE: ViT-Small transfer learning setup
 │   │   ├── train.py                 # YOU WRITE: Training loop
 │   │   ├── evaluate.py              # YOU WRITE: Metrics and evaluation
 │   │   └── export_onnx.py           # Export to ONNX format
 │   ├── inference/
 │   │   ├── detector.py              # YOLOv8n Hailo detection wrapper
-│   │   ├── classifier.py            # MobileNetV2 Hailo classification wrapper
+│   │   ├── classifier.py            # ViT-Small Hailo classification wrapper
 │   │   └── tracker.py               # Bird centroid tracking
 │   ├── pipeline/
 │   │   ├── camera.py                # RTSP capture (GStreamer/OpenCV)
@@ -186,8 +186,6 @@ bird-feeder-ai/
 ### Models
 - Hailo Model Zoo: https://github.com/hailo-ai/hailo_model_zoo
 - Hailo RPi5 Examples: https://github.com/hailo-rpi5-examples
-- HuggingFace EfficientNetB2 (validation): https://huggingface.co/dennisjooo/Birds-Classifier-EfficientNetB2
-
 ### Datasets
 - NABirds (555 NA species): https://dl.allaboutbirds.org/nabirds
 - CUB-200-2011 (benchmark): https://www.vision.caltech.edu/datasets/cub_200_2011/
@@ -216,19 +214,3 @@ bird-feeder-ai/
 - [ ] Phase 4: Backend & Storage
 - [ ] Phase 5: Audio Classification
 - [ ] Phase 6: Dashboard
-- [ ] Phase 7 (Bonus): EfficientNetB2 Upgrade
-
----
-
-### Phase 7 (Bonus): EfficientNetB2 Upgrade
-> **Goal:** Repeat the same training process with EfficientNetB2 for higher accuracy. Since the process is identical to Phase 1 (only the model load and head dimensions change), this reinforces everything you learned while producing a more accurate model (~99% vs ~94%).
-
-| Step | Task | Who | Notes |
-|------|------|-----|-------|
-| 7.1 | Swap model from MobileNetV2 to EfficientNetB2 | You | `models.efficientnet_b2(weights=...)`, head becomes `Linear(1408, 555)` |
-| 7.2 | Retrain on NABirds with same two-stage freeze/unfreeze approach | You | Same dataset, transforms, training loop — only the model changes |
-| 7.3 | Compare accuracy against your MobileNetV2 results | You | Side-by-side evaluation: confusion matrices, per-species metrics |
-| 7.4 | Export to ONNX and convert to Hailo HEF | You | Same process as Phase 2 |
-| 7.5 | Deploy the better model to the Pi | You | Swap the HEF file in config, done |
-
-**Reference repo:** [dennisjooo/Birds-Classifier-EfficientNetB2](https://github.com/dennisjooo/Birds-Classifier-EfficientNetB2) — `development.ipynb` has their full training code on Birds 525. They fine-tuned all layers (no freeze), used Adam (lr=1e-3), ReduceLROnPlateau scheduler, and hit 99.1% test accuracy in ~25 epochs on a Kaggle P100.

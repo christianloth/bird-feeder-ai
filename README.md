@@ -1,8 +1,8 @@
 # Bird Feeder AI
 
-24/7 bird and wildlife detection system using a Raspberry Pi 5, Hailo AI HAT+ 2 (Hailo-10H NPU), and an SV3C 4K PTZ camera at a bird feeder in Frisco, TX.
+24/7 bird detection system using a Raspberry Pi 5, Hailo AI HAT+ 2 (Hailo-10H NPU), and an SV3C 4K PTZ camera at a bird feeder in Frisco, TX.
 
-During the day, a two-stage AI pipeline detects and classifies birds to one of 555 species. At night, the system automatically switches to a wildlife detector (11 classes) trained on camera trap data. All inference runs on-device with no cloud dependency.
+A two-stage AI pipeline detects and classifies birds to one of 555 species. All inference runs on-device with no cloud dependency.
 
 ## Quick Start
 
@@ -26,33 +26,21 @@ Edit `config/config.yaml` with your camera RTSP URL, location, and preferences.
 python -m src.pipeline.pipeline --mode dev
 ```
 
-That's it. The pipeline connects to your camera, detects birds (day) or wildlife (night), classifies species, and saves everything to the database and disk.
+That's it. The pipeline connects to your camera, detects birds, classifies species, and saves everything to the database and disk.
 
 ## Architecture
 
 ```
-                          DAYTIME                                    NIGHTTIME
 Camera (RTSP) --> YOLO11n (COCO bird) --> Tracker --> ViT-Small ---------> DB
   or video file   "Is there a bird?"       Dedup      "What species?"     SQLite
                                                        555 NABirds        + images
-
-Camera (RTSP) --> YOLO11s (wildlife) ---> Tracker ----------------------> DB
-  or video file   "What animal?"           Dedup    class from detector   SQLite
-                  11 classes                                              + images
 ```
 
-The system checks sunrise/sunset times (Open-Meteo API) every 60 seconds. Night mode activates 30 minutes after sunset and deactivates 30 minutes before sunrise. Both offsets are configurable.
-
-**Daytime pipeline (bird species):**
+**Pipeline:**
 1. **Detection** -- YOLO11n finds birds (COCO class 14) and outputs bounding boxes
 2. **Tracking** -- Centroid-based tracker deduplicates so a bird sitting for 30 seconds is logged once
 3. **Classification** -- Cropped bird region is classified by ViT-Small (555 NABirds species)
 4. **Storage** -- Detection saved to SQLite with species, confidence, bbox coordinates, and one full frame image (crops generated on-the-fly)
-
-**Nighttime pipeline (wildlife):**
-1. **Detection** -- YOLO11s wildlife model detects 11 classes: bird, bobcat, coyote, raccoon, rabbit, skunk, opossum, squirrel, armadillo, cat, dog
-2. **Tracking** -- Same tracker, reset on mode switch
-3. **Storage** -- Same storage path, species comes directly from the YOLO model (no separate classifier)
 
 **Inference backends:**
 
@@ -144,8 +132,6 @@ The RTSP URL comes from `config/config.yaml`. The pipeline runs continuously unt
 | `--rtsp-url URL` | From config | RTSP camera URL (overrides config) |
 | `--device {cuda,mps,cpu}` | Auto (CUDA → MPS → CPU) | Force compute device |
 | `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` | From config | Logging verbosity |
-| `--no-night` | Off | Disable night mode (daytime bird detection only) |
-| `--day` / `--night` | Auto | Force day or night mode (mutually exclusive) |
 | `--virtual-rtsp` | Off | Loop a `--video` file through an in-process RTSP server to exercise the full pipeline |
 | `--output` | Off | Write an annotated video alongside the input (video mode only) |
 | `--no-save` | Off | Disable saving to database and disk (log only) |
@@ -167,7 +153,7 @@ python -m src.pipeline.pipeline --video path/to/video.mp4 --output
 Virtual RTSP — test the full RTSP pipeline (saves to database + `detections/rtsp/`) using a video file:
 
 ```bash
-python -m src.pipeline.pipeline --video clip.mp4 --virtual-rtsp --day --output
+python -m src.pipeline.pipeline --video clip.mp4 --virtual-rtsp --output
 ```
 
 Process every 12th frame of a video (faster, skips redundant frames):
@@ -180,12 +166,6 @@ Run with verbose logging (see per-frame inference timing, tracker details):
 
 ```bash
 python -m src.pipeline.pipeline --mode dev --log-level DEBUG
-```
-
-Disable night mode (bird detection only, no wildlife switching):
-
-```bash
-python -m src.pipeline.pipeline --mode dev --no-night
 ```
 
 Force CPU for testing:
@@ -395,14 +375,14 @@ python -m scripts.export_training_data --format both --since 2026-04-01
 
 ## Training
 
-The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species. Both models are confirmed to run in a single pass on the Hailo-10H NPU.
+The training pipeline fine-tunes a pretrained model on the NABirds dataset to classify 555 North American bird species. Both supported architectures run in a single pass on the Hailo-10H NPU.
 
 | Model | Input Size | Params | Training Strategy | LR Scheduler | Hailo-10H FPS |
 |---|---|---|---|---|---|
 | **ViT-Small** (default) | 224x224 | 21.1M | Single-phase end-to-end (lr=1e-4) | ReduceLROnPlateau | 116 |
-| **EfficientNet-Lite4** | 300x300 | 13.0M | Single-phase end-to-end (lr=1e-3) | ReduceLROnPlateau | 137 |
+| **ViT-Base** | 224x224 | 86.5M | Single-phase end-to-end (lr=1e-4) | ReduceLROnPlateau | 57 |
 
-ViT-Small is the primary model -- self-attention excels at fine-grained bird classification (TransFG, AAAI 2022: 89.9% on NABirds). EfficientNet-Lite4 is a CNN alternative with complementary error profiles.
+ViT-Small is the primary model -- self-attention excels at fine-grained bird classification (TransFG, AAAI 2022: 89.9% on NABirds). ViT-Base is a higher-capacity alternative at ~4x the params and ~2x the memory.
 
 ### 1. Download the NABirds dataset
 
@@ -414,28 +394,24 @@ Download NABirds from [https://dl.allaboutbirds.org/nabirds](https://dl.allabout
 # ViT-Small (default — recommended for fine-grained bird classification)
 python -m src.training.train
 
-# EfficientNet-Lite4 (CNN alternative)
-python -m src.training.train --model efficientnet_lite4
+# ViT-Base (higher-capacity alternative)
+python -m src.training.train --model vit_base
 ```
 
 #### Training CLI options
 
 | Flag | Default | Description |
 |---|---|---|
-| `--model {vit_small,efficientnet_lite4}` | `vit_small` | Model architecture |
+| `--model {vit_small,vit_base}` | `vit_small` | Model architecture |
 | `--batch-size` | `32` | Batch size |
 | `--num-workers` | `4` | Data loading workers |
 | `--amp` | Off | Enable mixed precision (CUDA only) |
 | `--resume` | Off | Resume from latest run's checkpoint |
-| `--preprocessed PATH` | None | Use preprocessed dataset (ViT-Small only) |
+| `--preprocessed PATH` | None | Use preprocessed dataset (works with either ViT variant) |
 
 #### Training strategies
 
-Both models train end-to-end in a single phase with ReduceLROnPlateau and early stopping (patience=5).
-
-**ViT-Small** uses a lower learning rate (1e-4) because transformer self-attention layers are sensitive to large gradient updates. Pretrained on ImageNet-21K (14M images) via timm's `augreg_in21k_ft_in1k` checkpoint.
-
-**EfficientNet-Lite4** uses standard LR (1e-3). Hardware-friendly CNN -- no squeeze-and-excitation blocks (which cause multi-pass issues on Hailo), ReLU6 instead of swish.
+Both ViT variants train end-to-end in a single phase with ReduceLROnPlateau and early stopping (patience=5). Lower learning rate (1e-4) is used because transformer self-attention layers are sensitive to large gradient updates. Both are pretrained on ImageNet-21K (14M images) via timm's `augreg_in21k_ft_in1k` checkpoints.
 
 #### Training output
 
@@ -474,17 +450,11 @@ After training, export models to ONNX format for cross-platform inference or con
 # Export ViT-Small classifier (auto-finds latest checkpoint)
 python -m src.training.export_onnx classifier
 
-# Export EfficientNet-Lite4 classifier
-python -m src.training.export_onnx classifier --model efficientnet_lite4
+# Export ViT-Base classifier
+python -m src.training.export_onnx classifier --model vit_base
 
 # Export a specific checkpoint
 python -m src.training.export_onnx classifier --checkpoint path/to/best_model.pth
-
-# Export YOLO wildlife detector
-python -m src.training.export_onnx yolo --weights models/wildlife/yolo11s-wildlife-equal/weights/best.pt
-
-# Export any YOLO variant
-python -m src.training.export_onnx yolo --weights models/wildlife/yolo11n-wildlife-equal/weights/best.pt
 ```
 
 #### Export CLI options
@@ -493,7 +463,7 @@ python -m src.training.export_onnx yolo --weights models/wildlife/yolo11n-wildli
 
 | Flag | Default | Description |
 |---|---|---|
-| `--model {vit_small,efficientnet_lite4}` | `vit_small` | Model architecture |
+| `--model {vit_small,vit_base}` | `vit_small` | Model architecture |
 | `--checkpoint PATH` | Auto (latest run) | Path to `.pth` checkpoint |
 | `--output PATH` | `models/onnx/<model>_birds.onnx` | Output path |
 
@@ -545,16 +515,11 @@ This file is gitignored (contains camera credentials). Key settings:
 | `species_classification` | `hef_model` | `vit_small_birds.hef` | Classifier HEF filename |
 | `species_classification` | `confidence_threshold` | `0.60` | Minimum species-classification confidence |
 | `species_classification` | `disabled_species_ids` | `[]` | Suppress specific species IDs entirely |
-| `wildlife_detection` | `model` | `yolo11s-wildlife-equal` | Custom wildlife YOLO (11 classes) |
-| `wildlife_detection` | `confidence_threshold` | `0.4` | Minimum wildlife-detection confidence |
-| `day_night` | `mode_check_interval` | `60` | Seconds between sun-time checks |
-| `day_night` | `night_offset_minutes` | `30` | Start night mode N minutes after sunset |
-| `day_night` | `day_offset_minutes` | `30` | Start day mode N minutes before sunrise |
 | `pipeline` | `process_every_n` | `5` | Process every Nth frame |
 | `pipeline` | `species_cooldown_seconds` | `120` | Suppress duplicate saves of same species for N seconds |
 | `pipeline` | `min_frames_for_detection` | `3` | Consecutive-frame count before a track is classified |
-| `location` | `latitude` / `longitude` | Frisco, TX | Location for sunrise/sunset calculation |
-| `location` | `timezone` | `America/Chicago` | IANA tz for mode transitions |
+| `location` | `latitude` / `longitude` | Frisco, TX | Location for the weather observations |
+| `location` | `timezone` | `America/Chicago` | IANA timezone |
 | `storage` | `save_crops` | `true` | Save cropped images alongside full frames |
 | `storage` | `crop_quality` / `thumbnail_quality` | `85` / `75` | JPEG quality for crops / thumbnails |
 | `storage` | `thumbnail_size` | `[200, 200]` | Thumbnail dimensions |
