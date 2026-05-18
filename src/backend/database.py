@@ -51,8 +51,7 @@ class Species(Base):
     family: Mapped[str | None] = mapped_column(String(200))
     class_index: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
     # Original NABirds classes.txt ID (non-contiguous, e.g. 338 for
-    # "California Quail (Male)"). Nullable because wildlife species have no
-    # NABirds mapping. Unique among non-null values.
+    # "California Quail (Male)"). Unique among non-null values.
     nabirds_id: Mapped[int | None] = mapped_column(Integer, unique=True, index=True)
     category: Mapped[str] = mapped_column(String(20), default="bird", server_default="bird")
 
@@ -250,42 +249,6 @@ def load_species_from_dataset(session: Session, nabirds_dir: Path) -> None:
             class_index=class_idx,
             nabirds_id=idx_to_class_id.get(class_idx),
             category="bird",
-        )
-        session.add(species)
-
-    session.commit()
-
-
-# Wildlife species for night-mode detection. class_index starts at 2000
-# to stay clear of NABirds range (0-1010).
-WILDLIFE_SPECIES = [
-    {"common_name": "bird", "scientific_name": "N/A", "family": "Wildlife", "class_index": 2000},
-    {"common_name": "bobcat", "scientific_name": "Lynx rufus", "family": "Wildlife", "class_index": 2001},
-    {"common_name": "coyote", "scientific_name": "Canis latrans", "family": "Wildlife", "class_index": 2002},
-    {"common_name": "raccoon", "scientific_name": "Procyon lotor", "family": "Wildlife", "class_index": 2003},
-    {"common_name": "rabbit", "scientific_name": "Sylvilagus floridanus", "family": "Wildlife", "class_index": 2004},
-    {"common_name": "skunk", "scientific_name": "Mephitis mephitis", "family": "Wildlife", "class_index": 2005},
-    {"common_name": "opossum", "scientific_name": "Didelphis virginiana", "family": "Wildlife", "class_index": 2006},
-    {"common_name": "squirrel", "scientific_name": "Sciurus carolinensis", "family": "Wildlife", "class_index": 2007},
-    {"common_name": "armadillo", "scientific_name": "Dasypus novemcinctus", "family": "Wildlife", "class_index": 2008},
-    {"common_name": "cat", "scientific_name": "Felis catus", "family": "Wildlife", "class_index": 2009},
-    {"common_name": "dog", "scientific_name": "Canis lupus familiaris", "family": "Wildlife", "class_index": 2010},
-]
-
-
-def load_wildlife_species(session: Session) -> None:
-    """Load wildlife species into the database for night-mode detection."""
-    existing = session.query(Species).filter(Species.category == "wildlife").count()
-    if existing > 0:
-        return
-
-    for ws in WILDLIFE_SPECIES:
-        species = Species(
-            common_name=ws["common_name"],
-            scientific_name=ws["scientific_name"],
-            family=ws["family"],
-            class_index=ws["class_index"],
-            category="wildlife",
         )
         session.add(species)
 

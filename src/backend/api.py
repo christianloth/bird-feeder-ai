@@ -31,7 +31,6 @@ from src.backend.database import (
     get_engine,
     create_tables,
     get_session_factory,
-    load_wildlife_species,
     migrate_species_category,
     migrate_ignore_regions_frame_size,
     seed_ignore_regions_from_config,
@@ -78,9 +77,6 @@ async def lifespan(app: FastAPI):
     migrate_ignore_regions_frame_size(_engine)
     seed_ignore_regions_from_config(_engine)
     _session_factory = get_session_factory(_engine)
-
-    with _session_factory() as session:
-        load_wildlife_species(session)
 
     _weather_service = WeatherService()
     _image_storage = ImageStorage()

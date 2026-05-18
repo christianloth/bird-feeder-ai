@@ -56,19 +56,6 @@ species_classification:
   # disabled_species_ids:
   #   - 338   # California Quail (Male)
 
-# --- Nighttime: Wildlife Detection (single-stage) ---
-# Custom YOLO that detects AND classifies 11 wildlife classes in one shot.
-# No separate classifier — the species comes directly from this model. REQUIRED.
-wildlife_detection:
-  model: "models/wildlife/yolo11s-wildlife-equal/weights/best.pt"
-  confidence_threshold: 0.4   # min confidence to accept a wildlife detection
-
-# --- Day/Night Mode ---
-day_night:
-  mode_check_interval: 60    # Seconds between sun time checks
-  night_offset_minutes: 30   # Start night mode this many minutes after sunset
-  day_offset_minutes: 30     # Start day mode this many minutes before sunrise
-
 # --- Pipeline ---
 pipeline:
   process_every_n: 5             # Process every Nth frame (higher = less CPU)
