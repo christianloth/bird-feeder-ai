@@ -209,8 +209,8 @@ Crops, thumbnails, and annotated views are generated on-the-fly from the frame +
 
 | Level | What you see |
 |---|---|
-| `DEBUG` | Per-frame inference timing, tracker lifecycle, classification scores, mode check results |
-| `INFO` | Startup config, detections, mode transitions, 5-minute status summaries |
+| `DEBUG` | Per-frame inference timing, tracker lifecycle, classification scores |
+| `INFO` | Startup config, detections, 5-minute status summaries |
 | `WARNING` | Slow inference (>500ms detect, >200ms classify), empty crops, high track counts, reconnection attempts |
 | `ERROR` | Frame processing failures, database save failures, API failures |
 | `CRITICAL` | Model file not found, camera unreachable after max retries |
@@ -520,7 +520,7 @@ This file is gitignored (contains camera credentials). Key settings:
 | `pipeline` | `min_frames_for_detection` | `3` | Consecutive-frame count before a track is classified |
 | `location` | `latitude` / `longitude` | Frisco, TX | Location for the weather observations |
 | `location` | `timezone` | `America/Chicago` | IANA timezone |
-| `storage` | `save_crops` | `true` | Save cropped images alongside full frames |
+| `storage` | `save_crops` | `true` | Save the full frame image for each detection |
 | `storage` | `crop_quality` / `thumbnail_quality` | `85` / `75` | JPEG quality for crops / thumbnails |
 | `storage` | `thumbnail_size` | `[200, 200]` | Thumbnail dimensions |
 | `storage` | `retention_days` | `90` | Delete detection images older than this |
