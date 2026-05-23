@@ -146,7 +146,7 @@ export function DebugClickLogger() {
         lineHeight: 1.3,
         maxWidth: 320,
         background: "rgba(7, 9, 10, 0.9)",
-        border: "1px solid rgba(244, 207, 138, 0.5)",
+        border: "1px solid rgba(114, 200, 234, 0.5)",
         borderRadius: 8,
         padding: 8,
         color: "#f6efe1",
@@ -163,7 +163,7 @@ export function DebugClickLogger() {
           gap: 8,
         }}
       >
-        <span style={{ color: "#f4cf8a", fontWeight: 600 }}>
+        <span style={{ color: "#72c8ea", fontWeight: 600 }}>
           DEBUG · {pathname}
         </span>
         <button
@@ -171,8 +171,8 @@ export function DebugClickLogger() {
           onClick={() => setCollapsed((c) => !c)}
           style={{
             background: "transparent",
-            border: "1px solid rgba(244, 207, 138, 0.45)",
-            color: "#f4cf8a",
+            border: "1px solid rgba(114, 200, 234, 0.45)",
+            color: "#72c8ea",
             borderRadius: 4,
             padding: "1px 6px",
             fontSize: 10,

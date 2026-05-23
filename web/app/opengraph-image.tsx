@@ -22,7 +22,7 @@ export default async function OG() {
           position: "relative",
         }}
       >
-        {/* Ember glow — top-left */}
+        {/* Azure glow — top-left */}
         <div
           style={{
             position: "absolute",
@@ -31,7 +31,7 @@ export default async function OG() {
             width: 720,
             height: 720,
             background:
-              "radial-gradient(circle, rgba(224,169,109,0.32) 0%, rgba(224,169,109,0) 65%)",
+              "radial-gradient(circle, rgba(61,165,217,0.28) 0%, rgba(61,165,217,0) 65%)",
             display: "flex",
           }}
         />
@@ -66,8 +66,8 @@ export default async function OG() {
           <svg width="44" height="44" viewBox="0 0 64 64" fill="none">
             <defs>
               <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#f4cf8a" />
-                <stop offset="100%" stopColor="#b07744" />
+                <stop offset="0%" stopColor="#72c8ea" />
+                <stop offset="100%" stopColor="#1a5272" />
               </linearGradient>
             </defs>
             <circle cx="46" cy="18" r="6" fill="url(#g)" opacity="0.9" />
@@ -94,7 +94,7 @@ export default async function OG() {
           <div style={{ display: "flex", fontSize: 152, color: "#f6efe1" }}>
             An evening
           </div>
-          <div style={{ display: "flex", fontSize: 152, color: "#f4cf8a" }}>
+          <div style={{ display: "flex", fontSize: 152, color: "#72c8ea" }}>
             with the birds.
           </div>
         </div>

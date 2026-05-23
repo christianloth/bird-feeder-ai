@@ -10,8 +10,8 @@ export function LogoMark({ size = 28 }: { size?: number }) {
     >
       <defs>
         <linearGradient id="lm-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#f4cf8a" />
-          <stop offset="100%" stopColor="#b07744" />
+          <stop offset="0%" stopColor="#72c8ea" />
+          <stop offset="100%" stopColor="#1a5272" />
         </linearGradient>
       </defs>
       {/* moon */}

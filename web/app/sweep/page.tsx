@@ -640,7 +640,7 @@ function FramePreview({ region }: { region: IgnoreRegion }) {
           width={rw}
           height={rh}
           rx="1.5"
-          fill="rgba(244, 207, 138, 0.18)"
+          fill="rgba(114, 200, 234, 0.18)"
           stroke="var(--color-ember-400)"
           strokeWidth="0.9"
         />
