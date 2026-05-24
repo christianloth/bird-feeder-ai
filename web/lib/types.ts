@@ -27,6 +27,9 @@ export interface Detection {
   corrected_species_id: number | null;
   corrected_species_name: string | null;
   source: string | null;
+  temperature_c: number | null;
+  weather_code: number | null;
+  weather_description: string | null;
 }
 
 export interface DetectionStats {

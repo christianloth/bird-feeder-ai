@@ -2,7 +2,7 @@
 
 import { motion } from "motion/react";
 import type { Detection } from "@/lib/types";
-import { confidenceTier, formatPct, localTime, timeAgo } from "@/lib/format";
+import { confidenceTier, formatPct, localTime, timeAgo, toFahrenheit } from "@/lib/format";
 import { imageUrl } from "@/lib/api";
 
 interface Props {
@@ -76,6 +76,22 @@ export function DetectionCard({ detection, onView, onDelete, index }: Props) {
             {formatPct(detection.confidence, 1)}
           </span>
         </div>
+
+        {(detection.weather_description != null || detection.temperature_c != null) && (
+          <div className="text-[0.7rem] text-[var(--color-sage-200)]">
+            {detection.temperature_c != null && (
+              <span className="font-mono text-[var(--color-ember-400)]">
+                {toFahrenheit(detection.temperature_c)}°F
+              </span>
+            )}
+            {detection.temperature_c != null && detection.weather_description != null && (
+              <span className="mx-1 opacity-40">·</span>
+            )}
+            {detection.weather_description != null && (
+              <span>{detection.weather_description}</span>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-[0.7rem] text-[var(--color-moss-300)]">
           <span className="font-mono">#{detection.id}</span>

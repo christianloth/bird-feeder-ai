@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, imageUrl } from "@/lib/api";
 import type { Detection } from "@/lib/types";
-import { formatNumber, formatPct, localTime } from "@/lib/format";
+import { formatNumber, formatPct, localTime, toFahrenheit } from "@/lib/format";
 import { StatCard } from "@/components/StatCard";
 import { Filters, EMPTY_FILTERS, type FilterValues } from "@/components/Filters";
 import { DetectionCard } from "@/components/DetectionCard";
@@ -63,6 +63,7 @@ function DashboardInner() {
 
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus });
+  const weatherQ = useQuery({ queryKey: ["weather"], queryFn: api.weather, refetchInterval: 5 * 60_000 });
   // Filter dropdown only lists species that have at least one detection.
   const speciesQ = useQuery({
     queryKey: ["species", "with-detections"],
@@ -223,6 +224,22 @@ function DashboardInner() {
         />
       </section>
 
+      {weatherQ.data && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-[var(--color-moss-700)] bg-[rgba(20,26,22,0.45)] px-5 py-2.5 text-[0.78rem] backdrop-blur-sm">
+          <span className="eyebrow">outdoors</span>
+          <span className="text-[var(--color-cream-100)]">{weatherQ.data.weather_description ?? "—"}</span>
+          {weatherQ.data.temperature_c != null && (
+            <span className="font-mono text-[var(--color-ember-400)]">{toFahrenheit(weatherQ.data.temperature_c)}°F</span>
+          )}
+          {weatherQ.data.humidity_pct != null && (
+            <span className="text-[var(--color-sage-200)]">{Math.round(weatherQ.data.humidity_pct)}% humidity</span>
+          )}
+          {weatherQ.data.wind_speed_kmh != null && (
+            <span className="text-[var(--color-sage-200)]">{Math.round(weatherQ.data.wind_speed_kmh)} km/h wind</span>
+          )}
+        </div>
+      )}
+
       <div className="my-8 h-px bg-gradient-to-r from-transparent via-[var(--color-moss-700)] to-transparent" />
 
       {/* Filters */}
@@ -291,7 +308,7 @@ function DashboardInner() {
             <div className="relative w-full">
               <div
                 aria-hidden
-                className="pointer-events-none absolute -inset-4 rounded-[28px] bg-gradient-to-br from-[rgba(224,169,109,0.14)] via-transparent to-[rgba(127,169,122,0.08)] blur-2xl"
+                className="pointer-events-none absolute -inset-4 rounded-[28px] bg-gradient-to-br from-[rgba(61,165,217,0.10)] via-transparent to-[rgba(127,169,122,0.08)] blur-2xl"
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -311,19 +328,30 @@ function DashboardInner() {
               </div>
               <div className="mt-3 flex flex-col items-center gap-2">
                 {viewing.detector_confidence != null && (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(61,165,217,0.08)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
                     <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">DETECT</span>
                     {formatPct(viewing.detector_confidence)}
                   </div>
                 )}
-                <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
+                <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(61,165,217,0.08)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
                   <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">SPECIES</span>
                   {formatPct(viewing.confidence)}
                 </div>
                 {viewing.crop_width != null && viewing.crop_height != null && (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(224,169,109,0.1)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(61,165,217,0.08)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
                     <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">CROP</span>
                     {viewing.crop_width}×{viewing.crop_height} → 224×224
+                  </div>
+                )}
+                {(viewing.temperature_c != null || viewing.weather_description) && (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(61,165,217,0.08)] px-4 py-1.5 text-[0.8rem] text-[var(--color-ember-400)]">
+                    <span className="font-mono text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">WEATHER</span>
+                    {viewing.temperature_c != null && (
+                      <span className="font-mono">{toFahrenheit(viewing.temperature_c)}°F</span>
+                    )}
+                    {viewing.weather_description && (
+                      <span className="text-[var(--color-sage-100)]">{viewing.weather_description}</span>
+                    )}
                   </div>
                 )}
               </div>

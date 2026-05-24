@@ -38,6 +38,10 @@ export function localTime(iso: string): string {
   });
 }
 
+export function toFahrenheit(c: number): number {
+  return Math.round(c * 9 / 5 + 32);
+}
+
 export function confidenceTier(c: number): "high" | "medium" | "low" {
   if (c >= 0.8) return "high";
   if (c >= 0.5) return "medium";

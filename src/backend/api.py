@@ -28,6 +28,7 @@ from src.backend.database import (
     IgnoreRegion,
     Species,
     DailySummary,
+    WeatherObservation,
     get_engine,
     create_tables,
     get_session_factory,
@@ -285,10 +286,26 @@ def list_detections(
 
     detections = query.order_by(desc(Detection.timestamp)).offset(skip).limit(limit).all()
 
+    hour_keys = {d.timestamp.replace(minute=0, second=0, microsecond=0) for d in detections}
+    weather_by_hour: dict = {}
+    if hour_keys:
+        weather_rows = session.query(WeatherObservation).filter(
+            WeatherObservation.timestamp.in_(list(hour_keys))
+        ).all()
+        weather_by_hour = {w.timestamp: w for w in weather_rows}
+
     results = []
     for d in detections:
         resp = DetectionResponse.model_validate(d)
         resp.species_name = d.species.common_name if d.species else None
+        if d.corrected_species:
+            resp.corrected_species_name = d.corrected_species.common_name
+        hour = d.timestamp.replace(minute=0, second=0, microsecond=0)
+        w = weather_by_hour.get(hour)
+        if w:
+            resp.temperature_c = w.temperature_c
+            resp.weather_code = w.weather_code
+            resp.weather_description = describe_weather_code(w.weather_code) if w.weather_code is not None else None
         results.append(resp)
 
     return results
@@ -357,6 +374,16 @@ def get_detection(detection_id: int, session: SessionDep):
                 resp.crop_height = max(0, cy2 - cy1)
             except Exception as e:
                 logger.debug(f"Could not read frame dims for detection {detection_id}: {e}")
+
+    hour = detection.timestamp.replace(minute=0, second=0, microsecond=0)
+    weather = session.query(WeatherObservation).filter(
+        WeatherObservation.timestamp == hour
+    ).first()
+    if weather:
+        resp.temperature_c = weather.temperature_c
+        resp.weather_code = weather.weather_code
+        resp.weather_description = describe_weather_code(weather.weather_code) if weather.weather_code is not None else None
+
     return resp
 
 

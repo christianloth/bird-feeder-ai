@@ -53,6 +53,9 @@ class DetectionResponse(BaseModel):
     corrected_species_id: int | None = None
     corrected_species_name: str | None = None
     source: str | None = None
+    temperature_c: float | None = None
+    weather_code: int | None = None
+    weather_description: str | None = None
 
     model_config = {"from_attributes": True}
 
