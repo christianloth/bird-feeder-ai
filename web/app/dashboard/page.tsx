@@ -43,7 +43,7 @@ function DashboardInner() {
     else sp.set("d", String(id));
     const qs = sp.toString();
     const path = qs ? `/dashboard/?${qs}` : "/dashboard/";
-    if (id === null) router.replace(path, { scroll: false });
+    if (id === null) window.history.replaceState(window.history.state, "", path);
     else router.push(path, { scroll: false });
   };
 

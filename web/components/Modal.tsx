@@ -17,10 +17,18 @@ export function Modal({ open, onClose, children, width = "max-w-[1100px]" }: Pro
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
+    // iOS Safari resets scrollY to 0 when overflow:hidden is applied to body.
+    // position:fixed + top:-scrollY locks scroll without losing position.
+    const scrollY = window.scrollY;
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.width = "";
+      window.scrollTo(0, scrollY);
     };
   }, [open, onClose]);
 
