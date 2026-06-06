@@ -7,7 +7,11 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB_SRC="${PROJECT_DIR}/db/birds.db"
 DETECTIONS_SRC="${PROJECT_DIR}/detections"
 REMOTE="dropbox:bird-feeder"
-TMP_DB="/tmp/birds_backup_$$.db"
+# Unpredictable name + 0600 perms so other local users can't read the DB copy
+# (mktemp avoids the predictable /tmp/...$$ symlink/pre-creation race).
+TMP_DB="$(mktemp "${TMPDIR:-/tmp}/birds_backup.XXXXXX.db")"
+chmod 600 "${TMP_DB}"
+trap 'rm -f "${TMP_DB}"' EXIT
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 

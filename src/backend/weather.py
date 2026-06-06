@@ -31,7 +31,8 @@ class WeatherService:
         self.latitude = latitude or settings.latitude
         self.longitude = longitude or settings.longitude
         self.timezone = timezone or settings.timezone
-        self._client = httpx.Client(timeout=30.0)
+        # Short timeout so a slow upstream can't park request threads for 30s.
+        self._client = httpx.Client(timeout=10.0)
 
     def get_current_weather(self) -> dict | None:
         """

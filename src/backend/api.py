@@ -6,7 +6,10 @@ and system status. Will be consumed by the future dashboard.
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from io import BytesIO
@@ -106,11 +109,20 @@ async def lifespan(app: FastAPI):
     logger.info("Bird Feeder AI API stopped.")
 
 
+# The interactive API docs (/docs, /redoc) and the OpenAPI schema enumerate
+# every endpoint — including the token-gated admin/mutation routes — to anyone.
+# Keep them OFF on the public deployment; opt in for local dev with
+# BIRDFEEDER_ENABLE_DOCS=1.
+_ENABLE_DOCS = os.environ.get("BIRDFEEDER_ENABLE_DOCS", "").lower() in {"1", "true", "yes"}
+
 app = FastAPI(
     title="Bird Feeder AI",
     description="API for querying bird detections, species stats, and weather data.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _ENABLE_DOCS else None,
+    redoc_url="/redoc" if _ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if _ENABLE_DOCS else None,
 )
 
 
@@ -136,12 +148,48 @@ async def admin_token_gate(request: Request, call_next):
             },
         )
     provided = request.headers.get("X-Admin-Token") or ""
-    if provided != expected:
+    # Constant-time comparison so the token can't be recovered via response-timing.
+    # Encode to bytes first: compare_digest on str rejects non-ASCII (would 500).
+    if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         return JSONResponse(
             status_code=401,
             content={"detail": "Admin token required"},
         )
     return await call_next(request)
+
+
+# Hardening headers applied to every response (incl. the static frontend and the
+# 401/503 above, since this middleware is registered last and runs outermost).
+# The CSP keeps 'unsafe-inline' for script/style because the Next.js static export
+# ships inline bootstrap — it still blocks cross-origin script injection and framing.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "Strict-Transport-Security": "max-age=31536000",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'"
+    ),
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for key, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    return response
+
 
 _WEB_OUT = _Path(__file__).resolve().parents[2] / "web" / "out"
 
@@ -257,7 +305,7 @@ def _parse_region(
 @app.get("/api/detections", response_model=list[DetectionResponse])
 def list_detections(
     session: SessionDep,
-    skip: int = 0,
+    skip: Annotated[int, Query(ge=0, le=100_000)] = 0,
     limit: Annotated[int, Query(le=500)] = 50,
     species_id: int | None = None,
     since: datetime | None = None,
@@ -532,7 +580,7 @@ def get_hourly_stats(
 @app.get("/api/species", response_model=list[SpeciesResponse])
 def list_species(
     session: SessionDep,
-    skip: int = 0,
+    skip: Annotated[int, Query(ge=0, le=100_000)] = 0,
     limit: Annotated[int, Query(le=1000)] = 100,
     with_detections: bool = False,
 ):
@@ -562,13 +610,32 @@ def get_species(species_id: int, session: SessionDep):
 # --- Weather ---
 
 
+# Cache the live current-weather fetch so the public endpoint can't be used to
+# amplify traffic into Open-Meteo (which would get the feeder's IP rate-limited).
+# Inbound rate is decoupled from outbound: at most one upstream call per TTL.
+_weather_cache: dict = {"ts": None, "data": None}
+_WEATHER_TTL = timedelta(minutes=10)
+
+
 @app.get("/api/weather/current", response_model=WeatherResponse)
 def get_current_weather():
-    """Get current weather conditions at the feeder location."""
+    """Get current weather conditions at the feeder location (cached ~10 min)."""
+    now = datetime.now()
+    cached = _weather_cache["data"]
+    cached_ts = _weather_cache["ts"]
+    if cached is not None and cached_ts is not None and (now - cached_ts) < _WEATHER_TTL:
+        return cached
+
     weather = _weather_service.get_current_weather()
     if not weather:
+        # Serve a stale value rather than fail if the upstream is briefly down.
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail="Weather service unavailable")
+
     weather["weather_description"] = describe_weather_code(weather.get("weather_code"))
+    _weather_cache["ts"] = now
+    _weather_cache["data"] = weather
     return weather
 
 
@@ -593,9 +660,33 @@ def get_daily_summaries(
 
 # --- Detection Images ---
 
+# Derived images (crop / frame / annotated) are immutable for a given detection:
+# the frame is written once and the bbox never changes. So we hand the browser
+# (and Cloudflare) a strong validator + long cache, and short-circuit the
+# expensive PIL decode/re-encode with a 304 when the client already has the bytes.
+# This is the main mitigation for unauthenticated image-endpoint CPU abuse.
+_IMG_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+def _frame_etag(frame_path: _Path, detection_id: int, variant: str) -> str:
+    st = frame_path.stat()
+    raw = f"{detection_id}:{variant}:{int(st.st_mtime)}:{st.st_size}"
+    return '"' + hashlib.sha1(raw.encode()).hexdigest() + '"'
+
+
+def _not_modified(request: Request, etag: str) -> Response | None:
+    """Return a 304 (skipping all image work) when the client's cached ETag matches."""
+    inm = request.headers.get("if-none-match")
+    if inm and (etag in {t.strip() for t in inm.split(",")} or inm.strip() == "*"):
+        return Response(
+            status_code=304,
+            headers={"ETag": etag, "Cache-Control": _IMG_CACHE_CONTROL},
+        )
+    return None
+
 
 @app.get("/api/detections/{detection_id}/crop")
-def get_detection_crop(detection_id: int, session: SessionDep):
+def get_detection_crop(detection_id: int, session: SessionDep, request: Request):
     """Serve the cropped detection image on-the-fly from the saved frame + bbox."""
     detection = session.get(Detection, detection_id)
     if not detection:
@@ -618,6 +709,11 @@ def get_detection_crop(detection_id: int, session: SessionDep):
     ):
         raise HTTPException(status_code=400, detail="Detection missing bbox coordinates")
 
+    etag = _frame_etag(frame_path, detection_id, "crop")
+    cached = _not_modified(request, etag)
+    if cached is not None:
+        return cached
+
     crop = ImageStorage.crop_from_frame(
         frame_path,
         (detection.bbox_x1, detection.bbox_y1, detection.bbox_x2, detection.bbox_y2),
@@ -626,11 +722,15 @@ def get_detection_crop(detection_id: int, session: SessionDep):
     buf = BytesIO()
     crop.save(buf, format="JPEG", quality=90)
     buf.seek(0)
-    return Response(content=buf.read(), media_type="image/jpeg")
+    return Response(
+        content=buf.read(),
+        media_type="image/jpeg",
+        headers={"ETag": etag, "Cache-Control": _IMG_CACHE_CONTROL},
+    )
 
 
 @app.get("/api/detections/{detection_id}/frame")
-def get_detection_frame(detection_id: int, session: SessionDep):
+def get_detection_frame(detection_id: int, session: SessionDep, request: Request):
     """Serve the full frame image for a detection."""
     detection = session.get(Detection, detection_id)
     if not detection:
@@ -642,9 +742,15 @@ def get_detection_frame(detection_id: int, session: SessionDep):
     if not frame_path.exists():
         raise HTTPException(status_code=404, detail="Frame image file not found on disk")
 
+    etag = _frame_etag(frame_path, detection_id, "frame")
+    cached = _not_modified(request, etag)
+    if cached is not None:
+        return cached
+
     return Response(
         content=frame_path.read_bytes(),
         media_type="image/jpeg",
+        headers={"ETag": etag, "Cache-Control": _IMG_CACHE_CONTROL},
     )
 
 
@@ -652,7 +758,7 @@ def get_detection_frame(detection_id: int, session: SessionDep):
 
 
 @app.get("/api/detections/{detection_id}/annotated")
-def get_annotated_frame(detection_id: int, session: SessionDep):
+def get_annotated_frame(detection_id: int, session: SessionDep, request: Request):
     """Serve the full frame with bounding box drawn on it."""
     from PIL import ImageDraw, ImageFont
 
@@ -665,6 +771,11 @@ def get_annotated_frame(detection_id: int, session: SessionDep):
     frame_path = _image_storage.get_absolute_path(detection.frame_path)
     if not frame_path.exists():
         raise HTTPException(status_code=404, detail="Frame image file not found on disk")
+
+    etag = _frame_etag(frame_path, detection_id, "annotated")
+    cached = _not_modified(request, etag)
+    if cached is not None:
+        return cached
 
     img = Image.open(frame_path)
     draw = ImageDraw.Draw(img)
@@ -706,7 +817,11 @@ def get_annotated_frame(detection_id: int, session: SessionDep):
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=90)
     buf.seek(0)
-    return Response(content=buf.read(), media_type="image/jpeg")
+    return Response(
+        content=buf.read(),
+        media_type="image/jpeg",
+        headers={"ETag": etag, "Cache-Control": _IMG_CACHE_CONTROL},
+    )
 
 
 # --- Features & Ignore Regions ---
@@ -848,8 +963,10 @@ def camera_snapshot():
         )
     try:
         data = _SNAPSHOT_PATH.read_bytes()
-    except OSError as e:
-        raise HTTPException(status_code=503, detail=f"Snapshot read failed: {e}")
+    except OSError:
+        # Don't echo the server filesystem path back to the client.
+        logger.exception("Snapshot read failed")
+        raise HTTPException(status_code=503, detail="Snapshot temporarily unavailable")
     headers = {"Cache-Control": "no-store, max-age=0"}
     return Response(content=data, media_type="image/jpeg", headers=headers)
 
@@ -1003,10 +1120,17 @@ if __name__ == "__main__":
     log_config["handlers"]["default"]["stream"] = "ext://sys.stdout"
     log_config["handlers"]["access"]["stream"] = "ext://sys.stdout"
 
+    # Production-safe defaults. The auto-reloader (a file watcher) must NOT run on
+    # an internet-facing service — opt in for local dev with BIRDFEEDER_RELOAD=1.
+    # Host stays 0.0.0.0 by default so the dockerized Caddy can reach it via
+    # host.docker.internal; set BIRDFEEDER_HOST=127.0.0.1 if nothing off-box needs it.
+    host = os.environ.get("BIRDFEEDER_HOST", "0.0.0.0")
+    reload = os.environ.get("BIRDFEEDER_RELOAD", "").lower() in {"1", "true", "yes"}
+
     uvicorn.run(
         "src.backend.api:app",
-        host="0.0.0.0",
+        host=host,
         port=8000,
-        reload=True,
+        reload=reload,
         log_config=log_config,
     )

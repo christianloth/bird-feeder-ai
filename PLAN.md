@@ -202,7 +202,7 @@ bird-feeder-ai/
 
 ### Frisco TX Birds
 - Frisco Birding Checklist: https://www.friscotexas.gov/DocumentCenter/View/21288/Frisco-Birding-Checklist
-- BirdNET geo model can predict species by week at coordinates (33.1507, -96.8236)
+- BirdNET geo model can predict species by week at coordinates (33.15, -96.82)
 
 ---
 

@@ -6,16 +6,27 @@
 }
 
 (site) {
-	handle /grafana {
-		redir * /grafana/d/bird-feeder-main/bird-feeder 302
-	}
-
-	handle /grafana/ {
-		redir * /grafana/d/bird-feeder-main/bird-feeder 302
-	}
-
-	handle /grafana/* {
-		reverse_proxy grafana:3000
+	# SECURITY: Grafana is gated behind HTTP basic auth so it is NOT reachable
+	# anonymously from the public internet. Its SQLite datasource (birds.db) is
+	# mounted read-write, so an unauthenticated Grafana admin could DELETE the
+	# production database, bypassing the FastAPI admin-token gate entirely.
+	# The FastAPI dashboard ("handle {}" below) stays public on purpose.
+	# BEFORE PUBLISHING: rotate CADDY_BASIC_AUTH_HASH *and* the Grafana admin
+	# password to strong, unique values (the shipped default is reused elsewhere).
+	# `handle` (so the catch-all handle below doesn't also match /grafana) with a
+	# nested `route` so directive order is honored: basic_auth runs FIRST for every
+	# /grafana path, so the auth challenge precedes any redirect or proxy. Nothing
+	# under /grafana is reachable without credentials.
+	@grafana path /grafana /grafana/ /grafana/*
+	handle @grafana {
+		route {
+			basic_auth {
+				{$CADDY_BASIC_AUTH_USER} {$CADDY_BASIC_AUTH_HASH}
+			}
+			redir /grafana /grafana/d/bird-feeder-main/bird-feeder 302
+			redir /grafana/ /grafana/d/bird-feeder-main/bird-feeder 302
+			reverse_proxy grafana:3000
+		}
 	}
 
 	@root path /

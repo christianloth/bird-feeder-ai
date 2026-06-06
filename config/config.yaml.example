@@ -64,8 +64,8 @@ pipeline:
 
 # --- Location (for sunrise/sunset calculation) ---
 location:
-  latitude: 33.1507    # Frisco, TX
-  longitude: -96.8236
+  latitude: 33.15      # Frisco, TX — coarse on purpose; put precise values in your own (gitignored) config.yaml
+  longitude: -96.82
   timezone: "America/Chicago"
 
 # --- Features ---

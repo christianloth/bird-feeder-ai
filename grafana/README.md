@@ -5,21 +5,21 @@ A Grafana stack for visualising the bird feeder database, fronted by Caddy with 
 ## Architecture
 
 ```
-[browser] ──▶ Caddy :80 (basic auth)
-                ├── /grafana/*  ──▶ grafana:3000
-                └── /*          ──▶ host FastAPI :8000
+[browser] ──▶ Caddy :80
+                ├── /grafana/*  ──▶ grafana:3000        (HTTP basic auth — gated)
+                └── /*          ──▶ host FastAPI :8000   (public dashboard)
 ```
 
 - **Same origin** — no CORS headaches; image URLs in the dashboard use relative paths like `/api/detections/<id>/crop`.
-- **One password** at the Caddy gate covers everything inside (Grafana runs in anonymous-viewer mode so you aren't prompted twice).
-- SQLite DB is bind-mounted **read-only** into the Grafana container.
+- **Basic auth gates `/grafana` only.** The FastAPI dashboard at `/` is intentionally public (it's the thing you share). Grafana's SQLite datasource is **read-write**, so an open Grafana would let anyone run `DELETE` against the production database — the Caddy gate is what prevents that. Keep `CADDY_BASIC_AUTH_HASH` set to a strong password.
+- The SQLite DB is bind-mounted **read-write** (WAL mode must write its `-wal`/`-shm` sidecars, so a read-only mount would break Grafana's reads) — which is exactly why Grafana must stay behind the auth gate.
 
 ## One-time setup
 
 1. Generate a bcrypt hash for the Caddy basic-auth password:
 
    ```bash
-   docker run --rm caddy:2 caddy hash-password --plaintext 'prettybirds'
+   docker run --rm caddy:2 caddy hash-password --plaintext 'CHANGE_ME_use_a_strong_unique_password'
    ```
 
 2. Copy `.env.example` to `.env` and paste the hash. **Escape every `$` as `$$`** so docker-compose doesn't try to interpolate it:
@@ -36,7 +36,7 @@ A Grafana stack for visualising the bird feeder database, fronted by Caddy with 
    docker compose --env-file .env up -d
    ```
 
-4. Visit `http://<pi-ip>/grafana/` — log in with the Caddy credentials (admin / prettybirds). The dashboard is provisioned automatically under the "Bird Feeder" folder.
+4. Visit `http://<pi-ip>/grafana/` — log in with the Caddy credentials you set in `.env`. The dashboard is provisioned automatically under the "Bird Feeder" folder.
 
 ## Exposing externally via ngrok
 

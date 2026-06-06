@@ -5,6 +5,8 @@ Edit config.yaml for your setup (camera credentials, thresholds, etc.).
 That file is gitignored -- see config.yaml.example for the template.
 """
 
+import os
+
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -135,8 +137,10 @@ class Settings:
     database_url: str = f"sqlite:///{_PROJECT_ROOT / 'db' / 'birds.db'}"
 
     # Weather / Location
-    latitude: float = _location.get("latitude", 33.1507)
-    longitude: float = _location.get("longitude", -96.8236)
+    # Defaults are coarse (~1km) on purpose — these are committed to the public
+    # repo. Set precise values in the gitignored config.yaml if you want them.
+    latitude: float = _location.get("latitude", 33.15)
+    longitude: float = _location.get("longitude", -96.82)
     timezone: str = _location.get("timezone", "America/Chicago")
 
     # Feature toggles (consumed by the API and frontend)
@@ -144,8 +148,11 @@ class Settings:
 
     # Admin auth — required for every write-method API call. Empty ⇒ writes
     # are refused with 503 so the server fails closed instead of silently
-    # allowing anonymous writes.
-    admin_token: str = str(_admin.get("token") or "")
+    # allowing anonymous writes. Read from config.yaml's admin.token first,
+    # else the BIRDFEEDER_ADMIN_TOKEN env var (matches the API's error message).
+    admin_token: str = str(
+        _admin.get("token") or os.environ.get("BIRDFEEDER_ADMIN_TOKEN") or ""
+    )
 
     # Notifications (Telegram)
     telegram: TelegramNotificationConfig = field(default_factory=TelegramNotificationConfig)

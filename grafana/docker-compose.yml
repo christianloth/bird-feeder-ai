@@ -9,7 +9,8 @@ services:
     user: "1000:1000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-prettybirds}
+      # Fail closed: refuse to start rather than ship a known default password.
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:?set GF_ADMIN_PASSWORD in grafana/.env}
       - GF_PLUGINS_PREINSTALL=frser-sqlite-datasource,dalvany-image-panel
       - GF_SERVER_ROOT_URL=${GF_ROOT_URL:-http://localhost/grafana/}
       - GF_SERVER_SERVE_FROM_SUB_PATH=true

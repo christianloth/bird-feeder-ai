@@ -42,6 +42,17 @@ detections/
 
 # Database
 db/
+*.db
+*.sqlite
+*.sqlite3
+
+# Large asset bundles / archives — may contain the real DB, detections, or other
+# data dumps. Keep these out of the repo (e.g. bird-feeder-assets.tar.zst).
+*.tar
+*.tar.zst
+*.tar.gz
+*.tgz
+*.zip
 
 # Environment
 .env

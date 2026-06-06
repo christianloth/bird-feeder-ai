@@ -66,7 +66,8 @@ class DetectionReview(BaseModel):
 
 
 class BulkDeleteRequest(BaseModel):
-    ids: list[int] = Field(default_factory=list)
+    # Cap the list so a single request can't build a giant IN-clause / payload.
+    ids: list[int] = Field(default_factory=list, max_length=10_000)
 
 
 class BulkDeleteResponse(BaseModel):
@@ -91,26 +92,29 @@ class IgnoreRegionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# Pixel coordinates are bounded to a sane range; this also rejects NaN/inf and
+# keeps stored labels short (they're rendered in the UI — React escapes them, but
+# we don't need unbounded text in the DB).
 class IgnoreRegionCreate(BaseModel):
-    label: str = ""
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-    frame_width: int | None = None
-    frame_height: int | None = None
+    label: str = Field(default="", max_length=200)
+    x1: float = Field(ge=0, le=100_000)
+    y1: float = Field(ge=0, le=100_000)
+    x2: float = Field(ge=0, le=100_000)
+    y2: float = Field(ge=0, le=100_000)
+    frame_width: int | None = Field(default=None, ge=1, le=100_000)
+    frame_height: int | None = Field(default=None, ge=1, le=100_000)
     overlap_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enabled: bool = True
 
 
 class IgnoreRegionUpdate(BaseModel):
-    label: str | None = None
-    x1: float | None = None
-    y1: float | None = None
-    x2: float | None = None
-    y2: float | None = None
-    frame_width: int | None = None
-    frame_height: int | None = None
+    label: str | None = Field(default=None, max_length=200)
+    x1: float | None = Field(default=None, ge=0, le=100_000)
+    y1: float | None = Field(default=None, ge=0, le=100_000)
+    x2: float | None = Field(default=None, ge=0, le=100_000)
+    y2: float | None = Field(default=None, ge=0, le=100_000)
+    frame_width: int | None = Field(default=None, ge=1, le=100_000)
+    frame_height: int | None = Field(default=None, ge=1, le=100_000)
     overlap_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     enabled: bool | None = None
 
