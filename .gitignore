@@ -22,6 +22,9 @@ models
 # Jupyter
 .ipynb_checkpoints/
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 # IDE
 .vscode/
 .idea/
