@@ -183,7 +183,7 @@ function DashboardInner() {
         </h1>
         <p className="max-w-[60ch] text-[0.95rem] leading-relaxed text-[var(--color-sage-100)]">
           Twenty-four hours a day, a small camera watches the feeder. Every visitor is
-          spotted, identified, and pressed gently into this log — annotated with the
+          spotted, identified, and pressed gently into this log, annotated with the
           time, weather, and the model&rsquo;s confidence in its guess.
         </p>
       </section>
