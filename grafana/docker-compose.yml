@@ -34,8 +34,12 @@ services:
     container_name: bird-feeder-caddy
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # Bind to loopback ONLY: the Cloudflare tunnel (cloudflared on localhost) is
+      # the only thing that should reach the origin. This stops any direct access
+      # from the public internet (including public IPv6) or the LAN that would
+      # bypass the tunnel. Reach the site via https://feedercam.loth.me.
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
     environment:
       - CADDY_BASIC_AUTH_USER=${CADDY_BASIC_AUTH_USER:-admin}
       - CADDY_BASIC_AUTH_HASH=${CADDY_BASIC_AUTH_HASH}
