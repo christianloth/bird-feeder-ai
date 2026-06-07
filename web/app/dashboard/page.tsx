@@ -329,12 +329,12 @@ function DashboardInner() {
               <div className="mt-3 flex flex-col items-center gap-2">
                 {viewing.detector_confidence != null && (
                   <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(61,165,217,0.08)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
-                    <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">DETECTION CONFIDENCE</span>
+                    <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">DETECTION CONF</span>
                     {formatPct(viewing.detector_confidence)}
                   </div>
                 )}
                 <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--color-ember-500)_45%,transparent)] bg-[rgba(61,165,217,0.08)] px-4 py-1.5 font-mono text-[0.8rem] text-[var(--color-ember-400)]">
-                  <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">SPECIES CONFIDENCE</span>
+                  <span className="text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">SPECIES CONF</span>
                   {formatPct(viewing.confidence)}
                 </div>
                 {viewing.crop_width != null && viewing.crop_height != null && (
