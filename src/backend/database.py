@@ -12,6 +12,7 @@ from datetime import datetime, date, time
 from pathlib import Path
 
 from sqlalchemy import (
+    JSON,
     String,
     Float,
     Integer,
@@ -86,6 +87,14 @@ class Detection(Base):
     is_false_positive: Mapped[bool] = mapped_column(Boolean, default=False)
     corrected_species_id: Mapped[int | None] = mapped_column(ForeignKey("species.id"))
     source: Mapped[str | None] = mapped_column(String(20), default="rtsp")
+    # The classifier's top-K species at detection time, highest probability
+    # first (rank 1 == the winning species in `species_id`). Each entry is
+    # {"species_id": int|null, "common_name": str, "confidence": float}.
+    # Derived from the same frame-averaged probabilities as the winner, so
+    # the dashboard can show runner-up guesses. NULL for rows saved before
+    # this column existed — those averaged logits are gone and can't be
+    # reconstructed.
+    top_predictions: Mapped[list | None] = mapped_column(JSON)
 
     species: Mapped[Species | None] = relationship(
         back_populates="detections", foreign_keys=[species_id],
@@ -273,6 +282,19 @@ def migrate_detection_detector_confidence(engine) -> None:
     if "detector_confidence" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE detections ADD COLUMN detector_confidence FLOAT"))
+
+
+def migrate_detection_top_k(engine) -> None:
+    """Add top_predictions column to detections (for existing DBs).
+
+    Historical rows stay NULL — the frame-averaged logits that produced
+    them are gone, so the runner-up ranking can't be reconstructed. Safe to
+    call repeatedly."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("detections")]
+    if "top_predictions" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE detections ADD COLUMN top_predictions JSON"))
 
 
 def migrate_ignore_regions_frame_size(engine) -> None:

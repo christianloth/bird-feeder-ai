@@ -355,6 +355,26 @@ function DashboardInner() {
                   </div>
                 )}
               </div>
+              {viewing.top_predictions && viewing.top_predictions.length > 1 && (
+                <div className="mt-4 border-t border-[var(--color-moss-700)] pt-3">
+                  <div className="mb-2 text-[0.62rem] tracking-[0.12em] text-[var(--color-sage-200)]">
+                    OTHER POSSIBILITIES
+                  </div>
+                  <ul className="flex flex-col gap-1">
+                    {viewing.top_predictions.slice(1, 3).map((p, i) => (
+                      <li
+                        key={`${p.species_id ?? p.common_name}-${i}`}
+                        className="text-[0.86rem] text-[var(--color-sage-100)]"
+                      >
+                        {p.common_name}
+                        <span className="ml-2 font-mono text-[var(--color-ember-400)]">
+                          {formatPct(p.confidence)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         ) : null}

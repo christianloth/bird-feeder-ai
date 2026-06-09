@@ -132,6 +132,9 @@ class Settings:
     process_every_n: int = _pipeline.get("process_every_n", 5)
     species_cooldown_seconds: int = _pipeline.get("species_cooldown_seconds", 120)
     min_frames_for_detection: int = _pipeline.get("min_frames_for_detection", 3)
+    # How many ranked species guesses to persist per detection (rank 1 == the
+    # winner). The dashboard shows the runners-up below the top species.
+    top_k_predictions: int = _pipeline.get("top_k_predictions", 5)
 
     # Database
     database_url: str = f"sqlite:///{_PROJECT_ROOT / 'db' / 'birds.db'}"

@@ -36,6 +36,7 @@ from src.backend.database import (
     create_tables,
     get_session_factory,
     migrate_species_category,
+    migrate_detection_top_k,
     migrate_ignore_regions_frame_size,
     seed_ignore_regions_from_config,
 )
@@ -78,6 +79,7 @@ async def lifespan(app: FastAPI):
     _engine = get_engine()
     create_tables(_engine)
     migrate_species_category(_engine)
+    migrate_detection_top_k(_engine)
     migrate_ignore_regions_frame_size(_engine)
     seed_ignore_regions_from_config(_engine)
     _session_factory = get_session_factory(_engine)

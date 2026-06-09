@@ -6,6 +6,12 @@ export interface Species {
   class_index: number;
 }
 
+export interface TopPrediction {
+  species_id: number | null;
+  common_name: string;
+  confidence: number;
+}
+
 export interface Detection {
   id: number;
   timestamp: string;
@@ -30,6 +36,7 @@ export interface Detection {
   temperature_c: number | null;
   weather_code: number | null;
   weather_description: string | null;
+  top_predictions: TopPrediction[] | null;
 }
 
 export interface DetectionStats {

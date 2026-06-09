@@ -29,6 +29,7 @@ from src.backend.database import (
     Species,
     load_species_from_dataset,
     migrate_detection_detector_confidence,
+    migrate_detection_top_k,
     migrate_ignore_regions_frame_size,
     migrate_species_category,
     migrate_species_nabirds_id,
@@ -132,6 +133,7 @@ class BirdPipeline:
         migrate_species_category(engine)
         migrate_species_nabirds_id(engine)
         migrate_detection_detector_confidence(engine)
+        migrate_detection_top_k(engine)
         migrate_ignore_regions_frame_size(engine)
         seed_ignore_regions_from_config(engine)
         self._session_factory = get_session_factory(engine)
@@ -156,8 +158,14 @@ class BirdPipeline:
         classifier_model: str = "vit_small_nabirds",
         source: str = "rtsp",
         detector_confidence: float | None = None,
+        top_predictions: list[dict] | None = None,
     ):
-        """Save a detection to storage and database, with species cooldown."""
+        """Save a detection to storage and database, with species cooldown.
+
+        top_predictions is the classifier's top-K ranking (each entry a dict
+        with class_index, common_name, confidence); it's resolved to DB
+        species_ids and stored on the row for the dashboard's runner-up view.
+        """
         # Species cooldown: skip if we recently saved the same species.
         # This prevents one bird sitting on the feeder from generating 40
         # database records due to tracker fragmentation.
@@ -208,6 +216,28 @@ class BirdPipeline:
                     ).count()
                     is_new_species = existing == 0
 
+                # Resolve each top-K class index to a DB species_id (+ canonical
+                # common_name) in one query so the dashboard can show/link the
+                # runner-up guesses. Falls back to the classifier's own name if
+                # a class somehow isn't in the species table.
+                resolved_top_predictions = None
+                if top_predictions:
+                    wanted = [p["class_index"] for p in top_predictions]
+                    info_by_idx = {
+                        ci: (sid, cn)
+                        for ci, sid, cn in session.query(
+                            Species.class_index, Species.id, Species.common_name
+                        ).filter(Species.class_index.in_(wanted)).all()
+                    }
+                    resolved_top_predictions = []
+                    for p in top_predictions:
+                        sid, cn = info_by_idx.get(p["class_index"], (None, None))
+                        resolved_top_predictions.append({
+                            "species_id": sid,
+                            "common_name": cn or p["common_name"],
+                            "confidence": round(float(p["confidence"]), 4),
+                        })
+
                 x1, y1, x2, y2 = bbox
                 detection = Detection(
                     timestamp=timestamp,
@@ -222,6 +252,7 @@ class BirdPipeline:
                     bbox_y2=float(y2),
                     frame_path=paths["frame_path"],
                     source=source,
+                    top_predictions=resolved_top_predictions,
                 )
                 session.add(detection)
                 session.commit()
@@ -489,12 +520,26 @@ class BirdPipeline:
                         if self.detector.backend == "hailo"
                         else Path(settings.detection_model).stem
                     )
+                    # Snapshot the classifier's top-K ranking from the SAME
+                    # frame-averaged probabilities the winner came from (not a
+                    # single-frame predict_top_k), so the dashboard's runner-up
+                    # view is consistent with the label we just locked in.
+                    top_idx = np.argsort(probs)[::-1][:settings.top_k_predictions]
+                    top_predictions = [
+                        {
+                            "class_index": int(i),
+                            "common_name": self.classifier.class_names.get(int(i), f"class_{i}"),
+                            "confidence": float(probs[i]),
+                        }
+                        for i in top_idx
+                    ]
                     self._save_detection(
                         frame, track.bbox, species_name, conf, dt,
                         detection_model=detection_model_name,
                         classifier_model=settings.classifier_model_path.stem,
                         source=self._source,
                         detector_confidence=track.detector_confidence or None,
+                        top_predictions=top_predictions,
                     )
 
                 new_detections.append({

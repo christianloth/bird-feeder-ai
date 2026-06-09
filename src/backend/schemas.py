@@ -32,6 +32,13 @@ class DetectionCreate(BaseModel):
     frame_path: str | None = None
 
 
+class TopPrediction(BaseModel):
+    """One entry in the classifier's top-K ranking for a detection."""
+    species_id: int | None = None
+    common_name: str
+    confidence: float
+
+
 class DetectionResponse(BaseModel):
     id: int
     timestamp: datetime
@@ -56,6 +63,10 @@ class DetectionResponse(BaseModel):
     temperature_c: float | None = None
     weather_code: int | None = None
     weather_description: str | None = None
+    # Classifier's ranked guesses (rank 1 == the winning species). NULL for
+    # detections saved before this was captured. Auto-populated from the ORM
+    # JSON column via from_attributes.
+    top_predictions: list[TopPrediction] | None = None
 
     model_config = {"from_attributes": True}
 
