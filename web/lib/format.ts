@@ -42,6 +42,10 @@ export function toFahrenheit(c: number): number {
   return Math.round(c * 9 / 5 + 32);
 }
 
+export function kmhToKnots(kmh: number): number {
+  return Math.round(kmh * 0.539957);
+}
+
 export function confidenceTier(c: number): "high" | "medium" | "low" {
   if (c >= 0.8) return "high";
   if (c >= 0.5) return "medium";

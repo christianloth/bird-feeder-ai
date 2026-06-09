@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, imageUrl } from "@/lib/api";
 import type { Detection } from "@/lib/types";
-import { formatNumber, formatPct, localTime, toFahrenheit } from "@/lib/format";
+import { formatNumber, formatPct, kmhToKnots, localTime, toFahrenheit } from "@/lib/format";
 import { StatCard } from "@/components/StatCard";
 import { Filters, EMPTY_FILTERS, type FilterValues } from "@/components/Filters";
 import { DetectionCard } from "@/components/DetectionCard";
@@ -235,7 +235,7 @@ function DashboardInner() {
             <span className="text-[var(--color-sage-200)]">{Math.round(weatherQ.data.humidity_pct)}% humidity</span>
           )}
           {weatherQ.data.wind_speed_kmh != null && (
-            <span className="text-[var(--color-sage-200)]">{Math.round(weatherQ.data.wind_speed_kmh)} km/h wind</span>
+            <span className="text-[var(--color-sage-200)]">{kmhToKnots(weatherQ.data.wind_speed_kmh)} kn wind</span>
           )}
         </div>
       )}
