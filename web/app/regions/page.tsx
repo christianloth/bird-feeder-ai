@@ -22,6 +22,9 @@ export default function RegionsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawMode, setDrawMode] = useState(false);
   const [refreshKey, setRefreshKey] = useState<number>(() => Date.now());
+  // Pin should only act on a frame the admin chose to load. The initial
+  // auto-fetch on mount doesn't count — they have to hit Refresh live first.
+  const [hasRefreshed, setHasRefreshed] = useState(false);
   const [snapshotMissing, setSnapshotMissing] = useState(false);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
 
@@ -245,6 +248,7 @@ export default function RegionsPage() {
 
   const refreshSnapshot = () => {
     setSnapshotMissing(false);
+    setHasRefreshed(true);
     setRefreshKey(Date.now());
   };
 
@@ -302,11 +306,15 @@ export default function RegionsPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (live) pinFrame.mutate(live.blob);
+                    if (live && hasRefreshed) pinFrame.mutate(live.blob);
                   }}
-                  disabled={pinFrame.isPending || !live}
+                  disabled={pinFrame.isPending || !live || !hasRefreshed}
                   className="btn-quiet !py-1.5 !text-[0.78rem]"
-                  title="Set this exact frame as the public pinned image"
+                  title={
+                    hasRefreshed
+                      ? "Set this exact frame as the public pinned image"
+                      : "Hit Refresh live first to load a frame to pin"
+                  }
                 >
                   <PinIcon />
                   {pinFrame.isPending
