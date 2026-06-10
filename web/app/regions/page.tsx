@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, imageUrl } from "@/lib/api";
+import { api, hasAdminToken, imageUrl } from "@/lib/api";
 import type { IgnoreRegion } from "@/lib/types";
 import { SnapshotCanvas, type DraftRect } from "./SnapshotCanvas";
 import { RegionsList } from "./RegionsList";
@@ -24,6 +24,60 @@ export default function RegionsPage() {
   const [refreshKey, setRefreshKey] = useState<number>(() => Date.now());
   const [snapshotMissing, setSnapshotMissing] = useState(false);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+
+  // Admin sees the live snapshot (so they can preview before pinning);
+  // public viewers see only the pinned frame. The token check is a UX hint
+  // — the server still 401s a snapshot fetch without a valid token.
+  // Mounted-only to avoid SSR/hydration mismatch (localStorage is client-only).
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    setIsAdmin(hasAdminToken());
+  }, []);
+
+  // Live-snapshot blob URL (admin only). Browsers don't send custom headers
+  // on plain <img src=...> requests, so we fetch the bytes with the token
+  // header and hand the canvas an object URL. Re-fetched whenever refreshKey
+  // bumps (initial mount + Refresh / Pin button).
+  const [liveBlobUrl, setLiveBlobUrl] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setLiveError(null);
+    api.fetchLiveSnapshotBlobUrl()
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        createdUrl = url;
+        setLiveBlobUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLiveError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [isAdmin, refreshKey]);
+
+  // Free the last live blob URL on unmount so we don't leak the buffer.
+  useEffect(() => {
+    return () => {
+      if (liveBlobUrl) URL.revokeObjectURL(liveBlobUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const canvasImageUrl = isAdmin
+    ? (liveBlobUrl ?? "")
+    : imageUrl.pinned(refreshKey);
   // Local optimistic copy for in-flight drag mutations — keeps the
   // rectangle perfectly stuck to the pointer instead of stuttering on
   // each network round-trip. Cleared once the server response arrives.
@@ -74,6 +128,16 @@ export default function RegionsPage() {
       api.ignoreRegions.updateSettings({ overlap_threshold }),
     onSuccess: (data) => {
       qc.setQueryData(["ignore-regions", "settings"], data);
+    },
+  });
+
+  // Admin: snapshot the current live frame as the new pinned image. Bump
+  // refreshKey so both the admin's live view and any cached pinned URLs
+  // re-fetch immediately.
+  const pinFrame = useMutation({
+    mutationFn: api.pinCameraFrame,
+    onSuccess: () => {
+      setRefreshKey(Date.now());
     },
   });
 
@@ -217,19 +281,33 @@ export default function RegionsPage() {
                 </>
               ) : null}
             </span>
-            <button
-              type="button"
-              onClick={refreshSnapshot}
-              className="btn-quiet ml-auto !py-1.5 !text-[0.78rem]"
-              title="Refresh the camera frame"
-            >
-              <RefreshIcon />
-              Refresh
-            </button>
+            {isAdmin ? (
+              <>
+                <button
+                  type="button"
+                  onClick={refreshSnapshot}
+                  className="btn-quiet ml-auto !py-1.5 !text-[0.78rem]"
+                  title="Re-fetch the live camera frame"
+                >
+                  <RefreshIcon />
+                  Refresh live
+                </button>
+                <button
+                  type="button"
+                  onClick={() => pinFrame.mutate()}
+                  disabled={pinFrame.isPending || !liveBlobUrl}
+                  className="btn-quiet !py-1.5 !text-[0.78rem]"
+                  title="Set this frame as the public pinned image"
+                >
+                  <PinIcon />
+                  {pinFrame.isPending ? "Pinning…" : "Pin frame"}
+                </button>
+              </>
+            ) : null}
           </div>
 
           <SnapshotCanvas
-            imageUrl={imageUrl.snapshot()}
+            imageUrl={canvasImageUrl}
             regions={renderedRegions}
             selectedId={selectedId}
             onSelect={setSelectedId}
@@ -305,21 +383,60 @@ export default function RegionsPage() {
 
           {snapshotMissing ? (
             <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-rust-600)] bg-[rgba(180,92,63,0.08)] p-3 text-[0.78rem] text-[var(--color-rust-500)]">
-              The pipeline isn&apos;t writing snapshots yet. Make sure it&apos;s
-              running, then hit{" "}
-              <button
-                type="button"
-                onClick={refreshSnapshot}
-                className="underline-offset-4 hover:underline"
-              >
-                refresh
-              </button>
-              .
+              {isAdmin ? (
+                <>
+                  The pipeline isn&apos;t writing snapshots yet. Make sure
+                  it&apos;s running, then hit{" "}
+                  <button
+                    type="button"
+                    onClick={refreshSnapshot}
+                    className="underline-offset-4 hover:underline"
+                  >
+                    refresh
+                  </button>
+                  .
+                </>
+              ) : (
+                <>No camera image has been pinned yet. Check back later.</>
+              )}
+            </div>
+          ) : null}
+          {isAdmin && liveError ? (
+            <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-rust-600)] bg-[rgba(180,92,63,0.08)] p-3 text-[0.78rem] text-[var(--color-rust-500)]">
+              Couldn&apos;t load the live frame: {liveError}
+            </div>
+          ) : null}
+          {pinFrame.isError ? (
+            <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-rust-600)] bg-[rgba(180,92,63,0.08)] p-3 text-[0.78rem] text-[var(--color-rust-500)]">
+              Pin failed:{" "}
+              {pinFrame.error instanceof Error
+                ? pinFrame.error.message
+                : String(pinFrame.error)}
             </div>
           ) : null}
         </div>
       </div>
     </div>
+  );
+}
+
+function PinIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 2v6" />
+      <path d="M9 8h6l1 6H8z" />
+      <path d="M12 14v8" />
+    </svg>
   );
 }
 

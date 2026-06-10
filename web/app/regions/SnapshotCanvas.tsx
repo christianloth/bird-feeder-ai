@@ -272,15 +272,21 @@ export function SnapshotCanvas({
       <span className="reticle bl" />
       <span className="reticle br" />
 
-      {imgError ? (
+      {!imageUrl ? (
+        <div className="flex aspect-[9/16] items-center justify-center px-6 text-center">
+          <div className="max-w-[40ch]">
+            <span className="eyebrow block">Loading…</span>
+            <p className="mt-3 text-[0.85rem] text-[var(--color-sage-200)]">
+              Fetching the camera frame.
+            </p>
+          </div>
+        </div>
+      ) : imgError ? (
         <div className="flex aspect-[9/16] items-center justify-center px-6 text-center">
           <div className="max-w-[40ch]">
             <span className="eyebrow block">No frame yet</span>
             <p className="mt-3 font-display italic text-[1.4rem] text-[var(--color-cream-50)]">
-              The pipeline isn&apos;t writing snapshots — start it and refresh.
-            </p>
-            <p className="mt-2 text-[0.85rem] text-[var(--color-sage-200)]">
-              <span className="font-mono">scripts/start_pipeline.sh</span>
+              The camera image isn&apos;t available right now.
             </p>
           </div>
         </div>
@@ -289,7 +295,11 @@ export function SnapshotCanvas({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             ref={imgRef}
-            src={`${imageUrl}${imageUrl.includes("?") ? "&" : "?"}t=${refreshKey}`}
+            src={
+              imageUrl.startsWith("blob:")
+                ? imageUrl
+                : `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}t=${refreshKey}`
+            }
             alt="Live camera frame"
             className="block h-auto w-full select-none"
             draggable={false}

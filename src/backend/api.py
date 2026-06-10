@@ -133,12 +133,18 @@ app = FastAPI(
 # and the icon routes load normally).
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
+# GET endpoints that still require the admin token. The live camera snapshot
+# would otherwise leak a real-time view of the feeder to any anonymous visitor
+# — only admins should see live; everyone else gets the pinned frame.
+_ADMIN_READ_PATHS = frozenset({"/api/camera/snapshot"})
+
 
 @app.middleware("http")
 async def admin_token_gate(request: Request, call_next):
     method = request.method.upper()
     path = request.url.path
-    if method in _READ_METHODS or not path.startswith("/api/"):
+    is_anonymous_read = method in _READ_METHODS and path not in _ADMIN_READ_PATHS
+    if is_anonymous_read or not path.startswith("/api/"):
         return await call_next(request)
     expected = settings.admin_token
     if not expected:
@@ -949,15 +955,20 @@ def delete_ignore_region(region_id: int, session: SessionDep):
 
 
 _SNAPSHOT_PATH = _Path(__file__).resolve().parents[2] / "data" / "cache" / "latest_snapshot.jpg"
+# The pinned frame lives under detections/ so it piggybacks on the Dropbox
+# backup (scripts/backup_dropbox.sh syncs that whole tree). Survives restarts
+# and restores cleanly — no separate backup wiring needed.
+_PINNED_DIR = _Path(__file__).resolve().parents[2] / "detections" / "_pinned"
+_PINNED_PATH = _PINNED_DIR / "pinned.jpg"
 
 
 @app.get("/api/camera/snapshot")
 def camera_snapshot():
-    """Serve the most recent rotated camera frame for the /regions UI.
+    """Serve the live rotated camera frame. Admin-only (gated in the middleware).
 
     The pipeline process atomically writes this file every ~1.5s; we just
-    stream it. 404s while the pipeline is warming up — the UI shows a
-    placeholder until the first frame arrives."""
+    stream it. Admins see live so they can preview before pinning; public
+    viewers hit /api/camera/pinned instead."""
     if not _SNAPSHOT_PATH.exists():
         raise HTTPException(
             status_code=404,
@@ -971,6 +982,49 @@ def camera_snapshot():
         raise HTTPException(status_code=503, detail="Snapshot temporarily unavailable")
     headers = {"Cache-Control": "no-store, max-age=0"}
     return Response(content=data, media_type="image/jpeg", headers=headers)
+
+
+@app.get("/api/camera/pinned")
+def camera_pinned():
+    """Serve the pinned camera frame — what public viewers see on /regions.
+
+    The pinned frame is updated only when an admin POSTs /api/camera/pin. If
+    no admin has pinned anything yet, the UI shows a placeholder."""
+    if not _PINNED_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No pinned frame yet — an admin needs to pin one",
+        )
+    try:
+        data = _PINNED_PATH.read_bytes()
+    except OSError:
+        logger.exception("Pinned snapshot read failed")
+        raise HTTPException(status_code=503, detail="Pinned snapshot temporarily unavailable")
+    headers = {"Cache-Control": "no-store, max-age=0"}
+    return Response(content=data, media_type="image/jpeg", headers=headers)
+
+
+@app.post("/api/camera/pin")
+def camera_pin():
+    """Pin the current live frame so public viewers see it on /regions.
+
+    Atomic write (tmp + rename) so a concurrent reader never observes a
+    half-written file. Admin-only via the POST gate in the middleware."""
+    if not _SNAPSHOT_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No live frame to pin — make sure the pipeline is running",
+        )
+    try:
+        data = _SNAPSHOT_PATH.read_bytes()
+        _PINNED_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _PINNED_PATH.with_name(_PINNED_PATH.name + ".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(_PINNED_PATH)
+    except OSError:
+        logger.exception("Pin failed")
+        raise HTTPException(status_code=503, detail="Could not pin frame")
+    return {"ok": True, "size_bytes": len(data)}
 
 
 # --- Delete Detection ---

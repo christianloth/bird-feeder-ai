@@ -36,6 +36,14 @@ function getStoredToken(): string {
   }
 }
 
+// "Is this client likely an admin?" — based on token presence in localStorage.
+// The UI uses this to decide whether to render admin-only affordances (e.g.
+// the live camera preview on /regions, the Pin button). A wrong token still
+// 401s on the actual request, so this is a UX hint, not an auth boundary.
+export function hasAdminToken(): boolean {
+  return getStoredToken().length > 0;
+}
+
 function setStoredToken(value: string) {
   if (typeof window === "undefined") return;
   try {
@@ -137,6 +145,29 @@ export const api = {
 
   features: () => jsonFetch<FeatureFlags>("/api/features"),
 
+  // Admin-only: pin the current live frame so the public /regions canvas shows it.
+  pinCameraFrame: () =>
+    jsonFetch<{ ok: boolean; size_bytes: number }>("/api/camera/pin", {
+      method: "POST",
+    }),
+
+  // Admin-only: fetch the live camera snapshot with the admin token in a header
+  // (browsers don't send headers on plain <img src=...> requests). Returns an
+  // object URL the caller must revoke when replaced/unmounted to free memory.
+  fetchLiveSnapshotBlobUrl: async (): Promise<string> => {
+    const token = getStoredToken();
+    const res = await fetch(`/api/camera/snapshot?t=${Date.now()}`, {
+      headers: token ? { "X-Admin-Token": token } : {},
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${text || "snapshot"}`);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
   ignoreRegions: {
     list: () => jsonFetch<IgnoreRegion[]>("/api/ignore-regions"),
     create: (body: IgnoreRegionCreate) =>
@@ -176,7 +207,12 @@ export const imageUrl = {
   frame: (id: number) => `/api/detections/${id}/frame`,
   annotated: (id: number) => `/api/detections/${id}/annotated`,
   // Cache-busted snapshot for the /regions page so the browser refetches
-  // when the user hits the refresh button.
+  // when the user hits the refresh button. Admin-only — anonymous viewers
+  // see imageUrl.pinned() instead.
   snapshot: (cacheBuster?: string | number) =>
     `/api/camera/snapshot${cacheBuster !== undefined ? `?t=${cacheBuster}` : ""}`,
+  // Public-facing pinned frame for /regions. Updated only when an admin
+  // POSTs /api/camera/pin, so a public viewer never sees the live feed.
+  pinned: (cacheBuster?: string | number) =>
+    `/api/camera/pinned${cacheBuster !== undefined ? `?t=${cacheBuster}` : ""}`,
 };
