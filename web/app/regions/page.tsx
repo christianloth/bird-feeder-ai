@@ -34,27 +34,27 @@ export default function RegionsPage() {
     setIsAdmin(hasAdminToken());
   }, []);
 
-  // Live-snapshot blob URL (admin only). Browsers don't send custom headers
-  // on plain <img src=...> requests, so we fetch the bytes with the token
-  // header and hand the canvas an object URL. Re-fetched whenever refreshKey
-  // bumps (initial mount + Refresh / Pin button).
-  const [liveBlobUrl, setLiveBlobUrl] = useState<string | null>(null);
+  // Live snapshot (admin only). We hold the raw Blob too so the Pin button
+  // can re-upload it — that's what makes Pin a WYSIWYG operation (server
+  // doesn't re-read its own disk, avoiding the ~1.5s race vs. the pipeline).
+  // Browsers don't send custom headers on plain <img src=...> requests, so
+  // we fetch with the token header and hand the canvas an object URL.
+  // Re-fetched whenever refreshKey bumps (initial mount + Refresh live).
+  const [live, setLive] = useState<{ blob: Blob; url: string } | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
     let createdUrl: string | null = null;
     setLiveError(null);
-    api.fetchLiveSnapshotBlobUrl()
-      .then((url) => {
-        if (cancelled) {
-          URL.revokeObjectURL(url);
-          return;
-        }
+    api.fetchLiveSnapshotBlob()
+      .then((blob) => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
         createdUrl = url;
-        setLiveBlobUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return url;
+        setLive((prev) => {
+          if (prev) URL.revokeObjectURL(prev.url);
+          return { blob, url };
         });
       })
       .catch((err: unknown) => {
@@ -70,13 +70,13 @@ export default function RegionsPage() {
   // Free the last live blob URL on unmount so we don't leak the buffer.
   useEffect(() => {
     return () => {
-      if (liveBlobUrl) URL.revokeObjectURL(liveBlobUrl);
+      if (live) URL.revokeObjectURL(live.url);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const canvasImageUrl = isAdmin
-    ? (liveBlobUrl ?? "")
+    ? (live?.url ?? "")
     : imageUrl.pinned(refreshKey);
   // Local optimistic copy for in-flight drag mutations — keeps the
   // rectangle perfectly stuck to the pointer instead of stuttering on
@@ -131,15 +131,22 @@ export default function RegionsPage() {
     },
   });
 
-  // Admin: snapshot the current live frame as the new pinned image. Bump
-  // refreshKey so both the admin's live view and any cached pinned URLs
-  // re-fetch immediately.
+  // Admin: pin the currently-displayed live frame so public viewers see it.
+  // Uploads the exact blob the canvas is rendering, so what gets pinned ==
+  // what the admin saw. We deliberately don't bump refreshKey here — that
+  // would swap the canvas to a brand-new live frame and you'd lose the
+  // visual confirmation that what's on screen is now also the pinned image.
+  // Hit Refresh live manually to advance.
   const pinFrame = useMutation({
-    mutationFn: api.pinCameraFrame,
-    onSuccess: () => {
-      setRefreshKey(Date.now());
-    },
+    mutationFn: (blob: Blob) => api.pinCameraFrame(blob),
   });
+  // When the admin refreshes to a new live frame, that frame hasn't been
+  // pinned yet — clear the "Pinned ✓" success state so the button reads
+  // "Pin this frame" again, accurately describing what would happen.
+  useEffect(() => {
+    pinFrame.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   // ── Geometry patching during drag (optimistic, debounced PATCH) ──────
   const patchTimers = useRef<Map<number, number>>(new Map());
@@ -294,13 +301,19 @@ export default function RegionsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => pinFrame.mutate()}
-                  disabled={pinFrame.isPending || !liveBlobUrl}
+                  onClick={() => {
+                    if (live) pinFrame.mutate(live.blob);
+                  }}
+                  disabled={pinFrame.isPending || !live}
                   className="btn-quiet !py-1.5 !text-[0.78rem]"
-                  title="Set this frame as the public pinned image"
+                  title="Set this exact frame as the public pinned image"
                 >
                   <PinIcon />
-                  {pinFrame.isPending ? "Pinning…" : "Pin frame"}
+                  {pinFrame.isPending
+                    ? "Pinning…"
+                    : pinFrame.isSuccess
+                    ? "Pinned ✓"
+                    : "Pin this frame"}
                 </button>
               </>
             ) : null}

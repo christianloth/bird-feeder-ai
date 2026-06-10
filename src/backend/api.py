@@ -1004,19 +1004,29 @@ def camera_pinned():
     return Response(content=data, media_type="image/jpeg", headers=headers)
 
 
+_MAX_PIN_BYTES = 8 * 1024 * 1024  # generous cap; the rotated JPEG is ~150-300 KB
+
+
 @app.post("/api/camera/pin")
-def camera_pin():
-    """Pin the current live frame so public viewers see it on /regions.
+async def camera_pin(request: Request):
+    """Pin a JPEG (the request body) as the public frame on /regions.
+
+    The admin client uploads the exact bytes currently displayed in their
+    browser, so what gets pinned matches what they saw — no race against
+    the pipeline's ~1.5s snapshot writer.
 
     Atomic write (tmp + rename) so a concurrent reader never observes a
     half-written file. Admin-only via the POST gate in the middleware."""
-    if not _SNAPSHOT_PATH.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="No live frame to pin — make sure the pipeline is running",
-        )
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty request body")
+    if len(data) > _MAX_PIN_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large to pin")
+    # JPEG magic bytes — a cheap sanity check so a stray request can't
+    # leave a non-image file sitting at pinned.jpg.
+    if not data.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(status_code=415, detail="Body is not a JPEG")
     try:
-        data = _SNAPSHOT_PATH.read_bytes()
         _PINNED_DIR.mkdir(parents=True, exist_ok=True)
         tmp = _PINNED_PATH.with_name(_PINNED_PATH.name + ".tmp")
         tmp.write_bytes(data)

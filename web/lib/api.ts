@@ -145,16 +145,21 @@ export const api = {
 
   features: () => jsonFetch<FeatureFlags>("/api/features"),
 
-  // Admin-only: pin the current live frame so the public /regions canvas shows it.
-  pinCameraFrame: () =>
+  // Admin-only: upload the bytes of the live frame the admin is currently
+  // looking at, so what gets pinned is exactly what they saw (no ~1.5s race
+  // against the pipeline's snapshot writer).
+  pinCameraFrame: (jpegBlob: Blob) =>
     jsonFetch<{ ok: boolean; size_bytes: number }>("/api/camera/pin", {
       method: "POST",
+      body: jpegBlob,
+      headers: { "Content-Type": "image/jpeg" },
     }),
 
-  // Admin-only: fetch the live camera snapshot with the admin token in a header
-  // (browsers don't send headers on plain <img src=...> requests). Returns an
-  // object URL the caller must revoke when replaced/unmounted to free memory.
-  fetchLiveSnapshotBlobUrl: async (): Promise<string> => {
+  // Admin-only: fetch the live camera snapshot with the admin token in a
+  // header (browsers don't send headers on plain <img src=...> requests).
+  // Returns the raw Blob so the caller can both display it (via object URL)
+  // and re-upload it for pin-exactly-what-I-see.
+  fetchLiveSnapshotBlob: async (): Promise<Blob> => {
     const token = getStoredToken();
     const res = await fetch(`/api/camera/snapshot?t=${Date.now()}`, {
       headers: token ? { "X-Admin-Token": token } : {},
@@ -164,8 +169,7 @@ export const api = {
       const text = await res.text().catch(() => "");
       throw new Error(`${res.status} ${res.statusText}: ${text || "snapshot"}`);
     }
-    const blob = await res.blob();
-    return URL.createObjectURL(blob);
+    return await res.blob();
   },
 
   ignoreRegions: {
