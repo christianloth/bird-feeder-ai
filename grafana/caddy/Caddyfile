@@ -6,17 +6,22 @@
 }
 
 (site) {
-	# SECURITY: Grafana is gated behind HTTP basic auth so it is NOT reachable
-	# anonymously from the public internet. Its SQLite datasource (birds.db) is
-	# mounted read-write, so an unauthenticated Grafana admin could DELETE the
-	# production database, bypassing the FastAPI admin-token gate entirely.
-	# The FastAPI dashboard ("handle {}" below) stays public on purpose.
-	# BEFORE PUBLISHING: rotate CADDY_BASIC_AUTH_HASH *and* the Grafana admin
-	# password to strong, unique values (the shipped default is reused elsewhere).
-	# `handle` (so the catch-all handle below doesn't also match /grafana) with a
-	# nested `route` so directive order is honored: basic_auth runs FIRST for every
-	# /grafana path, so the auth challenge precedes any redirect or proxy. Nothing
-	# under /grafana is reachable without credentials.
+	# Public, UNGATED Grafana surface: ONLY the published public-dashboard page,
+	# its public data API, and the shared static JS/CSS bundle. This is the sole
+	# anonymous Grafana path — no login, no admin UI, no /api/ds/query, and no
+	# data writes (the SQLite datasource opens read-only). Listed BEFORE @grafana
+	# so these paths skip the basic_auth gate below. Viewers cannot modify the
+	# dashboard (public dashboards are read-only by design).
+	@grafana_public path /grafana/public-dashboards/* /grafana/api/public/* /grafana/public/*
+	handle @grafana_public {
+		reverse_proxy grafana:3000
+	}
+
+	# SECURITY: everything else under /grafana — the admin UI, the login page, and
+	# the arbitrary-SQL query API (/api/ds/query) — stays gated behind HTTP basic
+	# auth (CADDY_BASIC_AUTH_*; the password is the FastAPI admin token). Nested
+	# `route` so basic_auth runs FIRST, before the redirect/proxy. The FastAPI
+	# dashboard ("handle {}" below) stays public on purpose.
 	@grafana path /grafana /grafana/ /grafana/*
 	handle @grafana {
 		route {
