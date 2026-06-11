@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Reject commit messages that contain AI co-author trailers or
+# "Generated with <AI tool>" footers. Tracked in the repo and wired up
+# via `git config core.hooksPath .githooks` so anyone cloning gets it.
+# To temporarily bypass (don't): git commit --no-verify
+set -u
+
+msg_file="$1"
+msg=$(grep -v '^#' "$msg_file" | tr -d '\r')
+
+ai_tools='claude|claude code|happy|happy coder|cursor|cursor ide|copilot|github copilot|anthropic|openai|chatgpt|gpt-?[0-9]|aider|devin|tabnine|codeium|windsurf|replit ?(ai|agent)?'
+
+# 1. Co-authored-by: <AI tool>
+if echo "$msg" | grep -iqE "co-authored-by:.*(${ai_tools})"; then
+    echo "✗ commit-msg hook: AI Co-authored-by trailer is not allowed." >&2
+    echo "  remove the 'Co-authored-by:' line and retry." >&2
+    exit 1
+fi
+
+# 2. "Generated with <AI tool>" or 🤖 footer
+if echo "$msg" | grep -iqE "generated (by|with).*(${ai_tools})|🤖 generated"; then
+    echo "✗ commit-msg hook: AI 'Generated with' / 🤖 footer is not allowed." >&2
+    echo "  remove the AI attribution footer and retry." >&2
+    exit 1
+fi
+
+exit 0
