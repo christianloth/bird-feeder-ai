@@ -62,6 +62,15 @@ function clearStoredToken() {
   }
 }
 
+// 401 recovery shared by every token-bearing request: drop the stale token
+// (so hasAdminToken() stops claiming admin) and ask for a fresh one.
+// Returns the trimmed candidate, or "" if the user cancelled.
+function promptForNewToken(message: string): string {
+  clearStoredToken();
+  const entered = window.prompt(message, "");
+  return entered?.trim() ?? "";
+}
+
 function buildHeaders(init: RequestInit | undefined, token: string): HeadersInit {
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -77,20 +86,27 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const token = isWrite ? getStoredToken() : "";
   let res = await fetch(url, { ...init, headers: buildHeaders(init, token) });
 
-  // One-shot recovery: if a write came back 401, prompt for a token,
-  // store it, and retry exactly once. Wrong token on retry throws.
+  // One-shot recovery: if a write came back 401, prompt for a token and
+  // retry exactly once. The entered token is persisted ONLY after the retry
+  // gets past the auth gate — storing it up front would make hasAdminToken()
+  // report admin with a garbage token, flipping the UI into admin mode that
+  // can never work (e.g. /regions swaps the public pinned image for a live
+  // snapshot fetch that 401s forever).
   if (res.status === 401 && isWrite && typeof window !== "undefined") {
-    clearStoredToken();
-    const entered = window.prompt(
+    const candidate = promptForNewToken(
       "This action needs the admin token. Enter it to continue:",
-      "",
     );
-    if (entered && entered.trim().length > 0) {
-      setStoredToken(entered.trim());
+    if (candidate.length > 0) {
       res = await fetch(url, {
         ...init,
-        headers: buildHeaders(init, entered.trim()),
+        headers: buildHeaders(init, candidate),
       });
+      if (res.status === 401) {
+        throw new Error("Wrong admin token — the action was not performed.");
+      }
+      // Any non-401 means the token passed the gate (even if the request
+      // itself failed validation), so it's safe to remember.
+      setStoredToken(candidate);
     }
   }
 
@@ -161,10 +177,28 @@ export const api = {
   // and re-upload it for pin-exactly-what-I-see.
   fetchLiveSnapshotBlob: async (): Promise<Blob> => {
     const token = getStoredToken();
-    const res = await fetch(`/api/camera/snapshot?t=${Date.now()}`, {
+    let res = await fetch(`/api/camera/snapshot?t=${Date.now()}`, {
       headers: token ? { "X-Admin-Token": token } : {},
       cache: "no-store",
     });
+    // Token rotated / revoked server-side: same recovery as writes — prompt
+    // once for a fresh token. On cancel or another 401 the stored token stays
+    // cleared, so callers can fall back to public (pinned-image) mode.
+    if (res.status === 401 && typeof window !== "undefined") {
+      const candidate = promptForNewToken(
+        "Your admin token is no longer valid. Enter a new one to keep the live view:",
+      );
+      if (candidate.length > 0) {
+        res = await fetch(`/api/camera/snapshot?t=${Date.now()}`, {
+          headers: { "X-Admin-Token": candidate },
+          cache: "no-store",
+        });
+        if (res.status === 401) {
+          throw new Error("Wrong admin token.");
+        }
+        setStoredToken(candidate);
+      }
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`${res.status} ${res.statusText}: ${text || "snapshot"}`);

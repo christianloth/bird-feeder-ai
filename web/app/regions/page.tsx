@@ -63,6 +63,10 @@ export default function RegionsPage() {
       .catch((err: unknown) => {
         if (cancelled) return;
         setLiveError(err instanceof Error ? err.message : String(err));
+        // If 401 recovery didn't yield a working token (cancelled prompt or
+        // wrong entry), the stored token is gone — drop to public mode so the
+        // visitor gets the pinned image instead of a dead admin view.
+        setIsAdmin(hasAdminToken());
       });
     return () => {
       cancelled = true;

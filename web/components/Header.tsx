@@ -25,6 +25,14 @@ export function Header() {
   });
   const sweepEnabled = features.data?.sweep ?? false;
   const [now, setNow] = useState<string>("");
+  // Grafana is gated behind basic-auth for now; the nav button shows a
+  // transient "coming soon" bubble instead of triggering the password prompt.
+  const [comingSoon, setComingSoon] = useState(false);
+  useEffect(() => {
+    if (!comingSoon) return;
+    const id = window.setTimeout(() => setComingSoon(false), 2200);
+    return () => window.clearTimeout(id);
+  }, [comingSoon]);
 
   useEffect(() => {
     const tick = () =>
@@ -100,15 +108,26 @@ export function Header() {
               <span className="hidden sm:inline">Sweep</span>
             </a>
           ) : null}
-          <a
-            href="/grafana"
-            title="Open Grafana analytics"
-            aria-label="Grafana"
-            className="nav-btn nav-btn--ember"
-          >
-            <GrafanaIcon size={14} />
-            <span className="hidden sm:inline">Grafana</span>
-          </a>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setComingSoon(true)}
+              title="Grafana analytics — coming soon"
+              aria-label="Grafana — coming soon"
+              className="nav-btn nav-btn--ember"
+            >
+              <GrafanaIcon size={14} />
+              <span className="hidden sm:inline">Grafana</span>
+            </button>
+            {comingSoon ? (
+              <span
+                role="status"
+                className="rise absolute right-0 top-full z-40 mt-2 whitespace-nowrap rounded-full border border-[var(--color-moss-700)] bg-[rgba(7,9,10,0.94)] px-3 py-1.5 font-mono text-[0.68rem] tracking-wide text-[var(--color-cream-100)] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.7)]"
+              >
+                Coming soon
+              </span>
+            ) : null}
+          </div>
         </nav>
       </div>
 
