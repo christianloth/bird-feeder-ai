@@ -84,7 +84,7 @@ def create_model(
     num_classes: int,
     pretrained: bool = True,
     freeze_backbone: bool = False,
-    model_name: str = "vit_small",
+    model_name: str = "vit_base",
 ) -> nn.Module:
     """
     Create a model adapted for bird species classification.

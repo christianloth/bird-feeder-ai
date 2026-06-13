@@ -28,7 +28,7 @@ class BirdClassifier:
     Species classifier with pluggable backends.
 
     Usage:
-        classifier = BirdClassifier.from_pytorch("models/bird-classifier/vit_small/best_model.pth")
+        classifier = BirdClassifier.from_pytorch("models/bird-classifier/vit_base/best_model.pth")
         species, confidence = classifier.predict(bird_crop_bgr)
     """
 
@@ -68,7 +68,7 @@ class BirdClassifier:
         num_classes: int = 555,
         device: str | None = None,
         confidence_threshold: float | None = None,
-        model_name: str = "vit_small",
+        model_name: str = "vit_base",
     ) -> "BirdClassifier":
         """Load a PyTorch checkpoint. Auto-selects MPS/CUDA/CPU."""
         from src.training.model import create_model, get_model_config

@@ -24,7 +24,7 @@ camera:
 # This only answers "is there a bird?" and draws a bounding box. REQUIRED.
 bird_detection:
   model: "models/base-models/yolo11n.pt"
-  hef_model: "yolov11s.hef"   # HEF model filename in models/hef/ for Hailo NPU
+  hef_model: "yolov11x.hef"   # HEF model filename in models/hef/ for Hailo NPU
   confidence_threshold: 0.4   # min confidence to consider a YOLO detection a bird
   bird_class_id: 14            # COCO class 14 = "bird"
   # Pixel regions to ignore. Any detection whose bbox overlaps an ignore
@@ -39,12 +39,12 @@ bird_detection:
   ignore_overlap_threshold: 0.5
 
 # --- Daytime: Species Classification (Stage 2) ---
-# ViT-Small classifier that takes the cropped bird from Stage 1
+# ViT-Base classifier that takes the cropped bird from Stage 1
 # and predicts which of 555 NABirds species it is.
-# ViT-Small chosen for fine-grained classification — self-attention captures
+# ViT-Base chosen for fine-grained classification — self-attention captures
 # long-range relationships between discriminative bird features (bill ↔ tail).
 species_classification:
-  hef_model: "vit_small_birds.hef"  # HEF model filename in models/hef/
+  hef_model: "vit_base_birds.hef"  # HEF model filename in models/hef/
   confidence_threshold: 0.60  # min confidence to accept a species prediction
   # Species to suppress entirely. IDs are from data/nabirds/classes.txt
   # (first column — e.g. 338 = "California Quail (Male)"). If the classifier's
