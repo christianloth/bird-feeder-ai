@@ -152,9 +152,9 @@ if __name__ == "__main__":
         help="Export a classification model (ViT-Small, ViT-Base)",
     )
     cls_parser.add_argument(
-        "--model", type=str, default="vit_small",
+        "--model", type=str, default="vit_base",
         choices=["vit_small", "vit_base"],
-        help="Model architecture (default: vit_small)",
+        help="Model architecture (default: vit_base)",
     )
     cls_parser.add_argument(
         "--checkpoint", type=str, default=None,

@@ -4,7 +4,7 @@ Main detection pipeline.
 Ties everything together: camera → detector → tracker → classifier → storage → database.
 
 Supports multiple deployment modes:
-- Development (Mac/PC): Ultralytics YOLO + PyTorch ViT-Small on MPS/CUDA/CPU
+- Development (Mac/PC): Ultralytics YOLO + PyTorch ViT-Base on MPS/CUDA/CPU
 - Production (Raspberry Pi): Hailo NPU for both detection and classification
 - Demo mode: Process a single image or video file instead of live camera
 """
@@ -155,7 +155,7 @@ class BirdPipeline:
         confidence: float,
         timestamp: datetime,
         detection_model: str = "yolov8n",
-        classifier_model: str = "vit_small_nabirds",
+        classifier_model: str = "vit_base_nabirds",
         source: str = "rtsp",
         detector_confidence: float | None = None,
         top_predictions: list[dict] | None = None,
@@ -865,7 +865,7 @@ class BirdPipeline:
 
 
 def create_pipeline_dev(
-    checkpoint_path: str | Path = "models/bird-classifier/vit_small/best_model.pth",
+    checkpoint_path: str | Path = "models/bird-classifier/vit_base/best_model.pth",
     class_names: dict[int, str] | None = None,
     rtsp_url: str | None = None,
     device: str | None = None,
@@ -987,7 +987,7 @@ if __name__ == "__main__":
         help="Process every Nth frame in video mode (default: from config)",
     )
     parser.add_argument(
-        "--checkpoint", type=str, default="models/bird-classifier/vit_small/best_model.pth",
+        "--checkpoint", type=str, default="models/bird-classifier/vit_base/best_model.pth",
         help="Path to trained model checkpoint (dev mode)",
     )
     parser.add_argument(

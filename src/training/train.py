@@ -548,9 +548,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train bird species classifier")
     parser.add_argument(
-        "--model", type=str, default="vit_small",
+        "--model", type=str, default="vit_base",
         choices=["vit_small", "vit_base"],
-        help="model architecture (default: vit_small)",
+        help="model architecture (default: vit_base)",
     )
     parser.add_argument("--batch-size", type=int, default=32, help="batch size (default: 32)")
     parser.add_argument("--num-workers", type=int, default=4, help="data loading workers (default: 4)")

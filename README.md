@@ -7,14 +7,14 @@ A two-stage AI pipeline detects and classifies birds to one of 555 North America
 ## Architecture
 
 ```
-Camera (RTSP) --> YOLO11x (COCO bird) --> Tracker --> ViT-Small ---------> DB
+Camera (RTSP) --> YOLO11x (COCO bird) --> Tracker --> ViT-Base ----------> DB
   or video file   "Is there a bird?"       Dedup      "What species?"     SQLite
                                                        555 NABirds        + images
 ```
 
 1. **Detection** — YOLO11x finds birds (COCO class 14) and outputs bounding boxes.
 2. **Tracking** — a Kalman + IOU tracker (Norfair) links a bird across frames so one bird sitting for 30 seconds is logged once.
-3. **Classification** — the cropped bird is classified by ViT-Small. Logits are averaged across all frames of a track before softmax for a more stable prediction than any single frame.
+3. **Classification** — the cropped bird is classified by ViT-Base. Logits are averaged across all frames of a track before softmax for a more stable prediction than any single frame.
 4. **Storage** — saved to SQLite with species, confidence, and bbox, plus one full-frame image (crops/thumbnails/annotated views are generated on the fly).
 
 **Backends:** Ultralytics/PyTorch (dev on Mac MPS / CUDA / CPU), ONNX Runtime (cross-platform), and Hailo HEF (production on the Pi).
@@ -106,16 +106,14 @@ Fine-tunes a pretrained model on the NABirds dataset (555 species). Both archite
 
 | Model | Input | Params | Hailo-10H FPS |
 |---|---|---|---|
-| **ViT-Small** (default) | 224×224 | 21.1M | 116 |
 | **ViT-Base** | 224×224 | 86.5M | 57 |
 
-ViT-Small is the primary model — self-attention excels at fine-grained classification (TransFG, AAAI 2022: 89.9% on NABirds). Both are pretrained on ImageNet-21K (timm `augreg_in21k_ft_in1k`) and trained end-to-end with ReduceLROnPlateau + early stopping.
+ViT-Base is the deployed classifier — self-attention excels at fine-grained classification (TransFG, AAAI 2022: 89.9% on NABirds). It's pretrained on ImageNet-21K (timm `augreg_in21k_ft_in1k`) and fine-tuned end-to-end with ReduceLROnPlateau + early stopping.
 
 ```bash
 # 1. download NABirds to data/nabirds/ from https://dl.allaboutbirds.org/nabirds
-# 2. train
-python -m src.training.train                 # ViT-Small
-python -m src.training.train --model vit_base # ViT-Base (--resume to continue)
+# 2. train (fine-tunes ViT-Base; --resume to continue)
+python -m src.training.train
 # 3. export to ONNX
 python -m src.training.export_onnx classifier
 ```
@@ -134,7 +132,7 @@ All settings live in `config/config.yaml` (gitignored). Key ones:
 | `camera` | `codec` | `h264` | `h264` (FFMPEG) or `h265` (GStreamer SW decode) |
 | `bird_detection` | `hef_model` | `yolov11x.hef` | Hailo detector HEF (hailo mode) |
 | `bird_detection` | `confidence_threshold` | `0.5` | Min YOLO bird-detection confidence |
-| `species_classification` | `hef_model` | `vit_small_birds.hef` | Classifier HEF |
+| `species_classification` | `hef_model` | `vit_base_birds.hef` | Classifier HEF |
 | `species_classification` | `confidence_threshold` | `0.60` | Min species-classification confidence |
 | `pipeline` | `process_every_n` | `5` | Process every Nth frame |
 | `pipeline` | `species_cooldown_seconds` | `120` | Suppress duplicate saves of same species |
