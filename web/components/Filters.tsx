@@ -1,6 +1,7 @@
 "use client";
 
 import type { Species, ReviewFilter } from "@/lib/types";
+import { SpeciesCombobox } from "@/components/SpeciesCombobox";
 
 export interface FilterValues {
   species_id: string;
@@ -45,20 +46,17 @@ export function Filters({ values, onChange, species }: Props) {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-        <Field label="Species">
-          <select
-            className="input-quiet"
+        {/* Not wrapped in <Field> (a <label>) on purpose: clicking a dropdown
+            option would bubble to the label and re-focus the input, reopening
+            the menu. The combobox carries its own aria-label instead. */}
+        <div className="flex flex-col gap-1.5">
+          <span className="eyebrow">Species</span>
+          <SpeciesCombobox
             value={values.species_id}
-            onChange={(e) => upd("species_id", e.target.value)}
-          >
-            <option value="">All species</option>
-            {species.map((sp) => (
-              <option key={sp.id} value={sp.id}>
-                {sp.common_name}
-              </option>
-            ))}
-          </select>
-        </Field>
+            onChange={(v) => upd("species_id", v)}
+            species={species}
+          />
+        </div>
 
         <Field label="Since">
           <input
